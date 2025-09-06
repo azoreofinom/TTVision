@@ -4,8 +4,9 @@ import math
 import random
 import shapely
 import time
-from itertools import combinations,permutations
+import itertools
 import matplotlib.pyplot as plt
+import networkx as nx
 
 LINE_CONNECTION_DIST = 100 #max distance between the endpoints of 2 lines which should be connected. this greatly influences the number of potential lines
 MIN_LINE_LENGTH = 50 #the minimum length of a line segment for it to be considered a potential side of the table (before extension)
@@ -52,7 +53,7 @@ class HoughBundler:
     def check_is_line_different(self, line_1, groups, min_distance_to_merge, min_angle_to_merge):
         for group in groups:
             for line_2 in group:
-                if self.get_distance(line_2, line_1) < min_distance_to_merge:
+                if self.get_distance(line_2, line_1) < min_distance_to_merge or get_intersection((line_1[0],line_1[1]),(line_1[2],line_1[3]),(line_2[0],line_2[1]),(line_2[2],line_2[3])):
                     orientation_1 = self.get_orientation(line_1)
                     orientation_2 = self.get_orientation(line_2)
                     if abs(orientation_1 - orientation_2) < min_angle_to_merge and self.are_collinear(line_2,line_1):
@@ -221,6 +222,9 @@ def get_existing_inter(line_list):
 
 
 def get_extension_side(p1,p2,p3,p4):
+    max_connection_dist = max(math.dist(p1,p2), math.dist(p3,p4))
+    max_connection_dist /= 10
+
     pairs = [(p1,p3),(p1,p4),(p2,p3),(p2,p4)]
     # Find the smallest distance and the corresponding pair
     min_dist = float('inf')
@@ -233,12 +237,12 @@ def get_extension_side(p1,p2,p3,p4):
             min_pair = (a, b)
     
     intersection_point = get_line_intersection(p1,p2,p3,p4)
-    if (intersection_point and min_dist<LINE_CONNECTION_DIST):
+    if (intersection_point and min_dist<max_connection_dist):
         k = pairs.index(min_pair)
-        if (k==0 or k==1) and math.dist(p1,intersection_point) < (LINE_CONNECTION_DIST*2): #and (math.dist(intersection_point,p2)>math.dist(p1,p2)):
+        if (k==0 or k==1) and math.dist(p1,intersection_point) < (max_connection_dist*2): #and (math.dist(intersection_point,p2)>math.dist(p1,p2)):
             # new_p1 = intersection_point
             return (1,intersection_point)
-        elif (k==2 or k==3) and math.dist(p2,intersection_point) < (LINE_CONNECTION_DIST*2): #and (math.dist(p1,intersection_point)>math.dist(p1,p2)):
+        elif (k==2 or k==3) and math.dist(p2,intersection_point) < (max_connection_dist*2): #and (math.dist(p1,intersection_point)>math.dist(p1,p2)):
             # new_p2 = intersection_point
             return (2,intersection_point)
         else:
@@ -291,7 +295,7 @@ def get_extension_side(p1,p2,p3,p4):
 def get_connected_lines2(lines):
     final_lines = []
     #permutations() ensures lines are not repeated(ie try to connect with themselves)
-    for combo in permutations(lines, 3): 
+    for combo in itertools.permutations(lines, 3): 
         p1, p2 = (combo[0][0],combo[0][1]), (combo[0][2],combo[0][3])
         p3, p4 = (combo[1][0],combo[1][1]), (combo[1][2],combo[1][3])
         p5, p6 = (combo[2][0],combo[2][1]), (combo[2][2],combo[2][3])
@@ -316,45 +320,149 @@ def get_connected_lines2(lines):
 
 
 def get_largest_quad(line_list):
-    print(f"nr of lines:{len(line_list)}")
+    print(line_list)
     if len(line_list)>MAX_LINES_TO_PROCESS:
         return None,None
     
     lines =  [ [(x1, y1), (x2, y2)] for x1, y1, x2, y2 in line_list ]
-    # Convert each line into a Shapely LineString
     line_strings = [shapely.LineString(line) for line in lines]
 
     max_area = 0
     best_quad = None
-    for combo in combinations(line_strings, 4):
-        # print(combo)   
+    for combo in itertools.combinations(line_strings, 4):  
         # Use polygonize to extract all closed polygons formed by lines
         polygons = shapely.polygonize(combo)
         if not polygons:
             continue
         
-        
         for geom in polygons.geoms:
             poly = shapely.Polygon(geom)
             area = poly.area
-            print(f"area?????{area}")
             if (len(geom.exterior.coords) - 1 == 4) and shapely.is_simple(geom) and area > max_area:
                 max_area = area
                 best_quad = poly
     
 
-    # Step 4: Output result
     if best_quad:
+        pass
         print("Max Area:", max_area)
-        print("Vertices:", list(best_quad.exterior.coords))
     else:
-        print("No simple quadrilateral found.")
         return None,None
 
-  
     return best_quad,max_area
 
+def get_largest_quad3(line_list):
+    G = nx.Graph()
 
+    # Build graph: endpoints as nodes, segments as edges
+    for x1, y1, x2, y2 in line_list:
+        p1 = (x1, y1)
+        p2 = (x2, y2)
+        G.add_edge(p1, p2)
+
+    seen = set()
+    max_area = 0
+    best_quad = None
+
+    # Use cycle_basis to find all simple cycles
+    for cycle in nx.cycle_basis(G):
+        if len(cycle) != 4:
+            continue
+        
+        print(cycle)
+        # Canonical form to avoid duplicates (e.g., rotations, flips)
+        canon = tuple(sorted(cycle))
+        print(f"canon:{canon}")
+        if canon in seen:
+            continue
+        seen.add(canon)
+        poly = shapely.Polygon(cycle)
+        if not poly.is_valid or not poly.is_simple:
+            continue
+
+        area = poly.area
+        if area > max_area:
+            max_area = area
+            best_quad = poly
+
+    if best_quad:
+        print("Max Area:", max_area)
+        return best_quad, max_area
+    else:
+        return None, None
+
+
+def get_largest_quad2(line_list):
+    G = nx.Graph()
+
+    # Add edges to graph from line segments
+    for x1, y1, x2, y2 in line_list:
+        p1 = (x1, y1)
+        p2 = (x2, y2)
+        G.add_edge(p1, p2)
+
+    max_area = 0
+    best_quad = None
+
+    for cycle in nx.simple_cycles(G,length_bound=4):
+        if len(cycle) != 4:
+            continue
+
+        # Sort the cycle to avoid duplicates (rotate and flip to canonical form)
+        # canon = tuple(sorted(cycle))
+
+        # print(cycle)
+        # Create polygon and validate
+        poly = shapely.Polygon(cycle)
+        
+        if not poly.is_valid or not poly.is_simple:
+            continue
+
+        area = poly.area
+        if area > max_area:
+                max_area = area
+                best_quad = poly
+    
+
+    if best_quad:
+        print("Max Area:", max_area)
+        return best_quad, max_area
+    else:
+        return None, None
+
+
+
+# def get_largest_quad(line_list):
+#     if len(line_list) > MAX_LINES_TO_PROCESS:
+#         return None, None
+
+#     # Convert raw line data directly to LineStrings
+#     line_strings = [shapely.LineString([(x1, y1), (x2, y2)]) for x1, y1, x2, y2 in line_list]
+
+#     # Use polygonize once on the full list
+#     polygons = list(shapely.polygonize(line_strings))
+
+#     max_area = 0
+#     best_quad = None
+
+#     for poly in polygons:
+#         if not isinstance(poly, shapely.Polygon):
+#             continue
+
+#         coords = list(poly.exterior.coords)
+        
+#         # Check for quadrilateral: 4 edges = 5 coords (last repeats first)
+#         if len(coords) - 1 == 4 and poly.is_valid and poly.is_simple:
+#             area = poly.area
+#             if area > max_area:
+#                 max_area = area
+#                 best_quad = poly
+
+#     if best_quad:
+#         print("Max Area:", max_area)
+#         return best_quad, max_area
+#     else:
+#         return None, None
 
 
 def GW_white_balance(img):
@@ -373,7 +481,28 @@ def contrast_stretch(channel):
     stretched = 255 * (channel - min_val) / (max_val - min_val)
     return stretched.astype(np.uint8)
 
+
+def get_top_longest_lines(segments):
+    # Compute length for each line segment and pair it with the segment
+    segments_with_length = [
+        (math.hypot(x2 - x1, y2 - y1), [x1, y1, x2, y2])
+        for x1, y1, x2, y2 in segments
+    ]
+    
+    # Sort by length in descending order
+    segments_with_length.sort(reverse=True, key=lambda x: x[0])
+    
+    # Calculate number of lines to take: top 30% or at least 30
+    n = min(30, len(segments) * 30 // 100)
+    
+    # Get the top segments and return only the line definitions (not lengths)
+    top_segments = [seg for _, seg in segments_with_length[:n]]
+    
+    return top_segments
+
+
 def find_white_lines_and_largest_contour(white_mask,original,maxGap=3,minHoughLine=15,display=False):
+    asd = original.copy()
     # ,(946,345,939,360)
 
     # testLines = [(338,399,205,476),(218,478,930,489),(879,413,965,487),(420,397,804,406), (403,349,403,365),(946,345,939,360),(946,489,962,488),(603,384,595,399),(970,399,990,395),(833,513,833,528),(536,513,551,513)] #last element is the extra line
@@ -427,13 +556,13 @@ def find_white_lines_and_largest_contour(white_mask,original,maxGap=3,minHoughLi
     # cv2.destroyAllWindows()
 
 
-    lines = cv2.HoughLinesP(white_mask, rho=1, theta=np.pi / 180, threshold=1,
+    lines = cv2.HoughLinesP(white_mask, rho=1, theta=np.pi / 180, threshold=50,
                             minLineLength=minHoughLine, maxLineGap=maxGap) #lower angle resolution, less issues with jagged lines? ( they count as one line)
     if lines is None:
-        if display:
-            cv2.imshow("white mask",white_mask)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
+        # if display:
+        #     cv2.imshow("white mask",white_mask)
+        #     cv2.waitKey(0)
+        #     cv2.destroyAllWindows()
         print("NO LINES FOUND")
         return None,None
 
@@ -441,27 +570,48 @@ def find_white_lines_and_largest_contour(white_mask,original,maxGap=3,minHoughLi
 
     
     # bundler = HoughBundler(min_distance=10,min_angle=10)
+
     print("raw lines")
-    print(lines)
+    # print(lines)
     print(f"LINE COUNT:{len(lines)}")
-    bundler = HoughBundler(min_distance=200,min_angle=10)
+
+
+    #this is so stupid LOL
+    # if len(lines)>250:
+    #     return None,None
+    
+
+
+    bundler = HoughBundler(min_distance=200,min_angle=3)
+
+    start = time.time()
     lines = bundler.process_lines(lines)
-    print("bundled lines")
-    print(lines)
-    print(f"LINE COUNT:{len(lines)}")
+    end = time.time()
+    print(f"bundling:{end - start} seconds")
+
+    # print("bundled lines")
+    # print(lines)
+    # print(f"LINE COUNT:{len(lines)}")
+
     lines = [tuple(line[0]) for line in lines]
     
 
 
 
 
-    filtered_lines = []
-    for line in lines:
-        x1, y1, x2, y2 = line
-        if (math.dist((x1,y1),(x2,y2))>MIN_LINE_LENGTH):
-            filtered_lines.append(line)
+    # filtered_lines = []
+    # for line in lines:
+    #     x1, y1, x2, y2 = line
+    #     if (math.dist((x1,y1),(x2,y2))>MIN_LINE_LENGTH):
+    #         filtered_lines.append(line)
     
-    lines = filtered_lines
+    # lines = filtered_lines
+
+
+
+    # print(f"nr of lines before picking top:{len(lines)}")
+    # final_lines = get_top_longest_lines(lines)
+    # lines = final_lines
 
 
     if display:
@@ -476,28 +626,48 @@ def find_white_lines_and_largest_contour(white_mask,original,maxGap=3,minHoughLi
                 b = random.randint(0, 255)
                 # Convert RGB to BGR for OpenCV
                 color = (b, g, r)
-                cv2.line(basic_lines, (x1, y1), (x2, y2), color, 1)
+                # cv2.line(basic_lines, (x1, y1), (x2, y2), color, 3)
                 cv2.line(original, (x1, y1), (x2, y2), color, 3)
 
 
 
-    print("lines before connecting")
-    print(lines)
-    print(f"LINE COUNT:{len(lines)}")
+    # print("lines before connecting")
+    # print(lines)
+    # print(f"LINE COUNT:{len(lines)}")
+
+    # print(f"nr of lines before connecting:{len(lines)}")
+    
+    print(original.shape[0])
+    print(f"before filtering:{len(lines)}")
+    filtered_lines = []
+    for line in lines:
+        x1, y1, x2, y2 = line
+        if (math.dist((x1,y1),(x2,y2))> original.shape[0]/10 ):
+            filtered_lines.append(line)
+    
+    lines = filtered_lines
+    print(f"after filtering:{len(lines)}")
 
 
-    #early exit here!
-    if len(lines)>MAX_LINES_TO_PROCESS*1.5:
-        return None,None
+
+
+    print(f"nr of lines before extending:{len(lines)}")
+    start = time.time()
     lines = get_connected_lines2(lines)
-    print(f"FINAL LINE COUNT:{len(lines)}")
-    # lines = [line[0] for line in lines]
+    end = time.time()
+    print(f"extending:{end - start} seconds")
 
-   
+
+    
+    
+    
+    
+
+
     if display:
         # Create blank image to draw lines
         line_img = np.zeros_like(white_mask)
-        color_lines = np.zeros_like(original)
+        color_lines = np.zeros_like(asd)
         if lines is not None:
             for line in lines:
                 x1, y1, x2, y2 = line
@@ -514,26 +684,29 @@ def find_white_lines_and_largest_contour(white_mask,original,maxGap=3,minHoughLi
 
     start = time.time()
 
-    best_quad,max_area = get_largest_quad(lines)
+    best_quad,max_area = get_largest_quad3(lines)
     end = time.time()
-    print(f"{end - start} seconds")
+    print(f"finding quad:{end - start} seconds")
     # Draw points
     if not best_quad:
-        print("TABLE NOT FOUND")
+        pass
+        # print("TABLE NOT FOUND")
     elif display:
         vert = list(best_quad.exterior.coords)
         vertices = [ (int(round(x)), int(round(y))) for x, y in vert ]
+        print(vertices)
         for point in vertices:
             cv2.circle(original, point, radius=5, color=(0, 255, 0), thickness=-1)  # Green filled circle
 
     if display:
+        print(f"display:{display}")
         cv2.imshow("white mask",white_mask)
-        # cv2.imshow("colored lines",color_lines)
-        cv2.imshow("Lines before connecting",basic_lines)
+        cv2.imshow("colored lines(after connecting)",color_lines)
+        # cv2.imshow("Lines before connecting",basic_lines)
         # cv2.imwrite("lines1.png",basic_lines)
         # cv2.imwrite("lines2.png",color_lines)
         
-        cv2.imshow("Largest Contour from Lines", original)
+        cv2.imshow("Lines before connecting??", original)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
@@ -541,3 +714,130 @@ def find_white_lines_and_largest_contour(white_mask,original,maxGap=3,minHoughLi
         return None,None
     else:
         return best_quad,max_area
+    
+    
+    
+    
+    
+def find_table(img, display=False):
+#am I calculating edges from the right image?
+#1. picking saturation threshold so I get all the table lines without too much random shit (automatic or connect to stronger parts?)
+#2. how to remove double lines?
+#3. speed up quad finding (only look at the longest lines, quick test?)
+#4. add conditions to check if it's probably the table?
+
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+    v_channel = hsv[:, :, 2]
+    s_channel = hsv[:, :, 1]
+
+    v_thresh = np.percentile(v_channel, 50)
+    s_thresh = np.percentile(s_channel, 50)
+
+    edges = cv2.Canny(img,80,200)
+
+    only_edge_parts = cv2.bitwise_and(img, img, mask=edges)
+    hsv_edges =  cv2.cvtColor(only_edge_parts, cv2.COLOR_BGR2HSV)
+
+    ve_channel = hsv_edges[:, :, 2]
+    se_channel = hsv_edges[:, :, 1]
+
+    # Flatten the V channel and filter out zeros
+    ve_values = ve_channel.flatten()
+    ve_nonzero = ve_values[ve_values > 0]
+
+    se_values = se_channel.flatten()
+    se_nonzero = se_values[se_values > 0]
+
+    ve_thresh = np.percentile(ve_nonzero, 50)
+    se_thresh = np.percentile(se_nonzero, 50)
+
+
+    # Create binary map: bright AND low saturation
+
+    # binary_map = (v_channel >= v_thresh) & (s_channel < 170)
+    binary_map = (v_channel >= ve_thresh) & (s_channel <= se_thresh)
+    # Convert boolean mask to uint8 (0 or 1)
+    binary_map_uint8 = binary_map.astype(np.uint8)
+    binary_image = (binary_map.astype(np.uint8)) * 255
+
+
+
+    white = cv2.bitwise_and(img, img, mask=binary_image)
+
+
+
+    mask = cv2.blur(binary_image,(3,3))
+    # mask = binary_image
+
+
+    thin_edges = cv2.ximgproc.thinning(edges,thinningType=0)
+    thin_mask = cv2.ximgproc.thinning(mask,thinningType=0)
+    combined2 = cv2.bitwise_and(edges,mask)
+
+    if display:
+        cv2.imshow('original',img)
+        cv2.imshow('mask',mask)
+        cv2.imshow('edge',edges)
+
+        # # Show the result
+        cv2.imshow('Top 20% Brightest Pixels (V channel)', combined2)
+
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+
+    best_quad = None
+    max_area = 0
+
+    largest_area = 0
+    largest_vert = []
+    largest_quad = None
+
+    start = time.time()
+
+    minHough = [60,50,40,30]
+    gaps = [4,5,6,7,10]
+
+    #threshold and angle resolution parameters?
+
+    original = img
+
+
+    for combo in itertools.product(gaps,minHough):
+        gap = combo[0]
+        minH = combo[1]
+        
+        img_copy = img.copy()
+        quad,area = find_white_lines_and_largest_contour(combined2,img_copy,maxGap=gap,minHoughLine=minH,display=False)
+        
+        if quad and area>largest_area:
+            largest_quad = quad
+            largest_vert = list(quad.exterior.coords)
+            largest_area = area
+            best_combo = combo
+
+
+    end = time.time()
+    print(f"{end - start} seconds")
+
+    if largest_area>0:
+    
+        vertices = [ (int(round(x)), int(round(y))) for x, y in largest_vert ]
+        print(vertices)
+
+        if display:
+            cv2.namedWindow("table", cv2.WINDOW_NORMAL)
+            cv2.resizeWindow("table", 800, 600)
+            for point in vertices:
+                cv2.circle(original, point, radius=5, color=(0, 255, 0), thickness=-1)  # Green filled circle
+
+            cv2.imshow("table",original)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+
+        return largest_quad
+
+    else:
+        print("TABLE NOT FOUND")
+        return None

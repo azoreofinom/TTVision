@@ -19,6 +19,9 @@ images/
 tempCodeRunnerFile.py
 /ttnet-ball-detection.ipynb
 /yolo_old.py
+/test.py
+/test_quad.py
+/test_contour_removal.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
