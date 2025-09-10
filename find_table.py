@@ -582,7 +582,7 @@ def find_white_lines_and_largest_contour(white_mask,original,maxGap=3,minHoughLi
     
 
 
-    bundler = HoughBundler(min_distance=200,min_angle=3)
+    bundler = HoughBundler(min_distance=100,min_angle=5)
 
     start = time.time()
     lines = bundler.process_lines(lines)
@@ -642,7 +642,7 @@ def find_white_lines_and_largest_contour(white_mask,original,maxGap=3,minHoughLi
     filtered_lines = []
     for line in lines:
         x1, y1, x2, y2 = line
-        if (math.dist((x1,y1),(x2,y2))> original.shape[0]/10 ):
+        if (math.dist((x1,y1),(x2,y2))> original.shape[0]/15 ):
             filtered_lines.append(line)
     
     lines = filtered_lines
@@ -742,6 +742,9 @@ def find_table(img, display=False):
     ve_channel = hsv_edges[:, :, 2]
     se_channel = hsv_edges[:, :, 1]
 
+    print('THRESHOLDS')
+   
+
     # Flatten the V channel and filter out zeros
     ve_values = ve_channel.flatten()
     ve_nonzero = ve_values[ve_values > 0]
@@ -752,6 +755,8 @@ def find_table(img, display=False):
     ve_thresh = np.percentile(ve_nonzero, 50)
     se_thresh = np.percentile(se_nonzero, 50)
 
+    print(ve_thresh)
+    print(se_thresh)
 
     # Create binary map: bright AND low saturation
 

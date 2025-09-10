@@ -12,7 +12,6 @@ images/
 
 #files to ignore for now
 /CSRT_tracker_on_back_sub.py
-/background_subtraction_blob_detection.py
 /background_subtraction_contour_detection.py
 /benchmark.py
 /frame_diff.py
