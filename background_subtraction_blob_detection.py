@@ -363,21 +363,41 @@ def point_side(a, b, p):
         return "colinear"
     
 
+def create_point(point_id, set_number, server, receiver, winner, start, end, bounces):
+    return {
+        "point_id": point_id,
+        "set_number": set_number,
+        "rally_length": len(bounces)-1,
+        "server": server,
+        "receiver": receiver,
+        "winner": winner,
+        "point_won_on_serve": winner == server,
+        "frame_start": start,
+        "frame_end": end,
+        "bounces": bounces
+    }
+
+
+
 if __name__ == '__main__':
+    display = True
     # capture = cv2.VideoCapture("myvideos/test60fps.mp4") 
-    # capture = cv2.VideoCapture("openData/game_3.mp4")
-    capture = cv2.VideoCapture("openData/serve2.mp4")
+    capture = cv2.VideoCapture("openData/game_3.mp4")
+    # capture = cv2.VideoCapture("openData/serve2.mp4")
 
     output = cv2.imread('images/output_table_flipped.jpg')
     
     fps = capture.get(cv2.CAP_PROP_FPS)
+    
     if fps>=60:
         skip_rate = round(fps/60)
     else:
         skip_rate = 1
 
+    analysis_fps  = round(fps/skip_rate)
     print(fps)
     print(skip_rate)
+
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5)) #ONLY FOR GMG!
     lower = np.array([0, 0, 50])   # Hue doesn't matter, saturation small, value high
     upper = np.array([179, 160, 255])
@@ -412,6 +432,10 @@ if __name__ == '__main__':
 
     print(f"scaled:{scaled_coords}")
     table_quad = shapely.Polygon(scaled_coords)
+
+    #this should help include bounces which are right on the boundary of the table
+    table_quad = table_quad.buffer(2, join_style="mitre")
+
     if table_quad:
         shapely.prepare(table_quad)
     else:
@@ -489,10 +513,17 @@ if __name__ == '__main__':
     prev_frame = cv2.resize(prev_frame,(DOWNSAMPLE_COLS,DOWNSAMPLE_ROWS),interpolation=cv2.INTER_AREA)
     prev_frame = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
 
-
+    table_midpoint = 445
     frame_count = -1
     bounces_this_point = []
     bounces = []
+    points_metadata = []
+    rally_length = 0
+    server = None
+    receiver = None
+    winner = None
+    point_start_frame = None
+
     while True:
         frame_count += 1
 
@@ -583,17 +614,18 @@ if __name__ == '__main__':
                 print(f"velocity:{velocity}")
             
             print(f"frames since ball:{frames_since_ball}")
-            if point_started and frames_since_ball == 0 and prev_velocity is not None and prev_velocity[1]>0 and velocity[1]<0 and table_quad.contains(shapely.Point(ball_history[-1].position)):
+            if point_started and frames_since_ball == 0 and prev_velocity is not None and prev_velocity[1]>=0 and velocity[1]<0 and table_quad.contains(shapely.Point(ball_history[-1].position)):
                 print("BOUNCE")
                 cv2.circle(frame, ball_history[-1].position, radius=2, color=(0, 255, 0), thickness=-1)
                 transformed_pos = cv2.perspectiveTransform(np.float32([ball_history[-1].position]).reshape(-1,1,2),M)
                 bounces_this_point.append((int(transformed_pos[0][0][0]),int(transformed_pos[0][0][1])))
                 print(transformed_pos)
                 print(transformed_pos[0][0])
-                cv2.circle(output, (int(transformed_pos[0][0][0]),int(transformed_pos[0][0][1])), radius=2, color=(0, 255, 0), thickness=-1)
-                cv2.imshow("output",output)
-                cv2.waitKey(0)
-                cv2.destroyAllWindows()
+                if display:
+                    cv2.circle(output, (int(transformed_pos[0][0][0]),int(transformed_pos[0][0][1])), radius=2, color=(0, 255, 0), thickness=-1)
+                    cv2.imshow("output",output)
+                    cv2.waitKey(0)
+                    cv2.destroyAllWindows()
 
 
 
@@ -621,9 +653,9 @@ if __name__ == '__main__':
                 #there could be multiple circular objects in the frame etc. this should be improved: makes sure detections are near each other?
                 #the change in x is completely arbitrary... do that differently
 
-                near_vertical = (vector_length(displacement_vector) < 5) or (displacement_vector[1]!=0 and abs(math.atan(displacement_vector[0]/displacement_vector[1])) < math.pi/6)
+                near_vertical = (vector_length(displacement_vector) < 5) or (displacement_vector[1]!=0 and abs(math.atan(displacement_vector[0]/displacement_vector[1])) < math.pi/4)
 
-                if circularity > 0.85 and math.dist(ball_pos, prev_pos) < MAX_DIST_FROM_PREVIOUS_POS and near_vertical and (ball_pos[0]<=inner_left or ball_pos[0]>=inner_right):
+                if circularity > 0.85 and math.dist(ball_pos, prev_pos) < MAX_DIST_FROM_PREVIOUS_POS and near_vertical and (ball_pos[0]<=inner_left or ball_pos[0]>=inner_right) and not table_quad.contains(shapely.Point(ball_pos)):
                     print(f"displacement:{displacement_vector}")
                     frames_since_ball = 0
                     high_confidence_count += 1
@@ -637,6 +669,14 @@ if __name__ == '__main__':
         
 
         if high_confidence_count >=3 and not point_started:
+            if point_side(midpoint2,midpoint1, ball_pos)=="left":
+                server = "left"
+                receiver = "right"
+            else:
+                server = "right"
+                receiver = "left"
+                
+            point_start_frame = frame_count
             print("point started!")
             bounces_this_point.clear()
             point_started = True
@@ -653,7 +693,8 @@ if __name__ == '__main__':
         if frames_since_ball>10:
             high_confidence_count = 0   
 
-        if frames_since_ball > fps:
+        #if the ball hasn't been seen in 1s, the point should be over?
+        if frames_since_ball > analysis_fps:
             frames_since_ball = 0
             last_high_conf_area = None
             ball_history.clear()
@@ -662,8 +703,15 @@ if __name__ == '__main__':
                 print("point over")
                 point_started = False
                 if len(bounces_this_point)>0:
+                    if bounces_this_point[-1][1]<table_midpoint: #bounced on the left side for the last time
+                        winner = "right"
+                    else:
+                        winner = "left"
+
                     print("proper point, added to stats")
-                    bounces.append(bounces_this_point)
+                    points_metadata.append(create_point(1,1,server,receiver,winner,point_start_frame,frame_count,bounces_this_point.copy()))
+                    print(points_metadata[-1])
+                    bounces.append(bounces_this_point.copy())
                 
         
 
@@ -677,7 +725,7 @@ if __name__ == '__main__':
         print(f"time per frame:{end_time-start_time}s")
 
 
-        display = False
+        
         if display:
             for point in scaled_coords:
                 cv2.circle(frame, point, radius=1, color=(0, 255, 0), thickness=-1)
@@ -704,5 +752,6 @@ if __name__ == '__main__':
     capture.release()
     cv2.destroyAllWindows()
 
-
-    stats.calculate(bounces)
+    print(points_metadata)
+    stats.get_stats(points_metadata)
+    # stats.calculate(midpoint1,midpoint2,bounces)
