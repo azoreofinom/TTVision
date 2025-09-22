@@ -64,6 +64,8 @@ def get_stats(points):
 
     stats = {}
 
+    print(f"nr of points:{df.shape[0]}")
+
     for player in players:
         total_points_won = df[df['winner'] == player].shape[0]
         total_serves = df[df['server'] == player].shape[0]
@@ -71,11 +73,13 @@ def get_stats(points):
         rally_lengths = df[df['winner'] == player]['rally_length']
         winning_bounces = df[df['winner'] == player]['bounces'].str[-1].tolist()
         
+        output_copy = output.copy()
         for pos in winning_bounces:
-            cv2.circle(output, pos, radius=2, color=(0, 255, 0), thickness=-1)
-            cv2.imshow("output",output)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
+            cv2.circle(output_copy, pos, radius=2, color=(0, 255, 0), thickness=-1)
+            
+        # cv2.imshow(player,output_copy)
+        # cv2.waitKey(0)
+        # cv2.destroyAllWindows()
 
         stats[player] = {
             "points_won": total_points_won,
@@ -83,7 +87,6 @@ def get_stats(points):
             "avg_rally_length_on_wins": rally_lengths.mean() if not rally_lengths.empty else 0,
             "winning_bounces": winning_bounces
         }
-        print("HALLLOOO")
         print(player)
         print(stats[player])
 

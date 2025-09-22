@@ -7,57 +7,35 @@ import find_table
 import heapq
 import shapely
 import stats
+import json
+
 
 class BallCandidate:
-    def __init__(self, radius: float, circularity: float, position: tuple):
+    def __init__(self, radius: float, circularity: float, position: tuple, frame,contour):
         self.radius = radius
         self.circularity = circularity
         self.position = position  # position should be a tuple (x, y)
+        self.frame = frame
+        self.contour = contour
 
     def __repr__(self):
         return (f"BallCandidate(radius={self.radius}, "
                 f"circularity={self.circularity}, "
-                f"position={self.position})")
-
-# backSub = cv2.bgsegm.createBackgroundSubtractorMOG(history=20,nmixtures=5, backgroundRatio=0.7) #thrash
-backSub = cv2.createBackgroundSubtractorMOG2(varThreshold=16, detectShadows=True, history=500) #best so far
-# backSub = cv2.createBackgroundSubtractorKNN(history=500, dist2Threshold=100, detectShadows=True) #ok
-# backSub = cv2.bgsegm.createBackgroundSubtractorGMG(initializationFrames=120, decisionThreshold=0.9)
-# backSub = cv2.bgsegm.createBackgroundSubtractorGSOC() #sees the ball in the problematic serve case... could be good with some tuning?
-
+                f"position={self.position}, "
+                f"frame={self.frame})")
 
 
 DOWNSAMPLE_ROWS = 360
 DOWNSAMPLE_COLS = 640
-
-# DOWNSAMPLE_ROWS = 1080
-# DOWNSAMPLE_COLS = 1920
-
-
 MIN_DIST_FROM_OTHER_CONTOURS = DOWNSAMPLE_COLS //15 
-
 OVERLAPPING_CONTOUR_DIST = 10 /2
-MIN_RADIUS = 1.5 # this is a bit scuffed...
-MAX_RADIUS = 30 / 2
+MIN_RADIUS = 1.3 # this is a bit scuffed...
+MAX_RADIUS = 8
 MIN_CIRCULARITY = 0.4
-
 MAX_DIST_FROM_PREVIOUS_POS  = DOWNSAMPLE_COLS // 20
-
-
-
-
 TRACKING_WINDOW_HEIGHT = DOWNSAMPLE_ROWS // 4
 TRACKING_WINDOW_WIDTH = DOWNSAMPLE_COLS // 4
-
-
-
-
-
-# MIN_DIST_FROM_OTHER_CONTOURS = 30 
-# OVERLAPPING_CONTOUR_DIST = 10 
-# MIN_RADIUS = 4 
-# MAX_RADIUS = 30 
-# MIN_CIRCULARITY = 0.65 
+MAX_TRACKING_DIST = math.sqrt(TRACKING_WINDOW_HEIGHT**2 + TRACKING_WINDOW_WIDTH**2)
 
 def vector_length(v):
     return math.sqrt(sum(coord ** 2 for coord in v))
@@ -80,23 +58,10 @@ def get_ball_contour(frame_mask):
     # img_int32 = np.int32(frame_mask)
 
 
-    contours, _ = cv2.findContours(frame_mask, cv2.RETR_EXTERNAL     , cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(frame_mask, cv2.RETR_EXTERNAL     , cv2.CHAIN_APPROX_NONE)
     contour_image = np.zeros_like(frame_mask)
     cv2.drawContours(contour_image, contours, -1, (255), 1)  # 1 is line thickness
 
-
-
-
-    # if contours:
-    #     largest_contour = max(contours, key=cv2.contourArea)
-    #     cv2.drawContours(contour_image, [largest_contour], -1, (255), 25)
-    # else:
-    #     print("No contours found.")
-
-
-    # cv2.imshow('big',contour_image)
-    # cv2.waitKey(0)
-    # cv2.destroyAllWindows()
 
     best_contour = None
     best_score = 0  # Score based on circularity
@@ -111,28 +76,9 @@ def get_ball_contour(frame_mask):
             continue
 
         circularity = 4 * math.pi * area / (perimeter ** 2)
-        # perimeter = cv2.arcLength(cnt, True)
         if area == 0 or radius >= MAX_RADIUS or radius<MIN_RADIUS or circularity<0.85:
             not_ball_cnt.add(i)
       
-    
-
-    #was checking to see if the contour was too close to other contours. ignore for now...
-    # for i,cnt1 in enumerate(contours):
-    #     for j,cnt2 in enumerate(contours):
-    #         if i!=j and i not in not_ball_cnt:
-    #             # print(f"cnt1:{cnt1}")
-    #             centroid1 = get_cnt_centroid(cnt1)
-    #             # print(f"centroid:{centroid1}")
-    #             # print(f"cnt2:{cnt2}")
-    #             centroid2 = get_cnt_centroid(cnt2)
-    #             # print(f"centroid:{centroid2}")
-    #             if math.dist(centroid1,centroid2) > OVERLAPPING_CONTOUR_DIST and math.dist(centroid1,centroid2) < MIN_DIST_FROM_OTHER_CONTOURS:
-    #                 not_ball_cnt.add(i)
-    #                 not_ball_cnt.add(j)
-
-   
-    # print(f"nr of candidates:{len(contours) - len(not_ball_cnt)}")
 
     for i,cnt in enumerate(contours):
         if i in not_ball_cnt:
@@ -156,68 +102,35 @@ def get_ball_contour(frame_mask):
     return best_contour
 
 
-def get_ball_during_point(frame_mask,prev_ball,left,right,roi_l,roi_r,ball_area):
+def get_ball_during_point(frame_mask,full_mask,prev_ball,left,right,roi_l,roi_r,ball_area):
     #find contour in roi which is closest in radius and circ to previous? circ closeness is not reliable!
     #roi needs to be large enough to allow for change of direction after hit
     #extension: instead of simple roi, consider parabola?
     prev_r = prev_ball.radius
     prev_c = prev_ball.circularity
     prev_pos = prev_ball.position
-    print(prev_pos)
-
-    contours, _ = cv2.findContours(frame_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-
-    # roi_topleft = (max(0, prev_pos[0]-TRACKING_WINDOW_WIDTH), max(0,prev_pos[1]-TRACKING_WINDOW_HEIGHT))
+    prev_cnt = prev_ball.contour
+  
     roi_topleft = roi_l
     roi_botright = roi_r
-
-
-
-    # roi = frame_mask[roi_topleft[1]:roi_botright[1], roi_topleft[0]:roi_botright[0]]
-    # contours, _ = cv2.findContours(roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE, offset=roi_topleft)
-
-
+    roi = frame_mask[roi_topleft[1]:roi_botright[1], roi_topleft[0]:roi_botright[0]]
+    roi_contours, _ = cv2.findContours(roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE, offset=roi_topleft)
 
     
+    # full_roi = full_mask[roi_topleft[1]:roi_botright[1], roi_topleft[0]:roi_botright[0]]
+    #full_contours, _ = cv2.findContours(full_roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE, offset=roi_topleft)
+    #TRYING TO GET ALL CONTOURS, NOT JUST FROM ROI, TO AVOID PART OF ARM/BAT BEING DETECTED
+    full_contours, _ = cv2.findContours(full_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
 
-    # print(roi.shape)
-    
 
-    # frame_mask = cv2.cvtColor(frame_mask,cv2.COLOR_GRAY2RGB)
-    # cv2.rectangle(frame_mask, roi_topleft,roi_botright, (0,255,0),3)
-    # # cv2.imshow("roi",roi)
+    contours = roi_contours
+    print(f"nr of contours:{len(contours)}")
    
-    # cv2.waitKey(0)
-    # cv2.destroyAllWindows()
 
     best_contour = None
     lowest_diff = float('inf') 
 
     not_ball_cnt = set()
-    # for i,cnt in enumerate(contours):
-    #     area = cv2.contourArea(cnt)
-    #     radius = math.sqrt(area / math.pi)
-    #     perimeter = cv2.arcLength(cnt, True)
-    #     if perimeter==0:
-    #         not_ball_cnt.add(i)
-    #         continue
-
-    #     circularity = 4 * math.pi * area / (perimeter ** 2)
-    #     if area == 0 or area < ball_area/2 or area>ball_area*4:
-    #         not_ball_cnt.add(i)
-    
-    for i,cnt1 in enumerate(contours):
-        for j,cnt2 in enumerate(contours):
-            if i!=j and i not in not_ball_cnt:
-                centroid1 = get_cnt_centroid(cnt1)
-                centroid2 = get_cnt_centroid(cnt2)
-                nearby_area = cv2.contourArea(cnt2)
-                if  math.dist(centroid1,centroid2) < MIN_DIST_FROM_OTHER_CONTOURS and nearby_area>ball_area*4:
-                    not_ball_cnt.add(i)
-                    break
-                    # not_ball_cnt.add(j)
-      
 
     for i,cnt in enumerate(contours):
         pos = get_cnt_centroid(cnt)
@@ -237,14 +150,24 @@ def get_ball_during_point(frame_mask,prev_ball,left,right,roi_l,roi_r,ball_area)
         radius = math.sqrt(area / math.pi)
         perimeter = cv2.arcLength(cnt, True)
         if perimeter == 0:
+            print(f"excluded perim candidate:{area/ball_area} {radius}")
             continue
         
         circularity = 4 * math.pi * area / (perimeter ** 2)
 
-        if area == 0 or area < ball_area/2 or area>ball_area*4 or circularity<0.4: #or radius >= MAX_RADIUS or radius<MIN_RADIUS or circularity<0.45:
+        if area == 0 or area < ball_area/3 or area>ball_area*8 or circularity<0.25: #or radius >= MAX_RADIUS or radius<MIN_RADIUS or circularity<0.45:
+            print(f"excluded candidate:{area/ball_area} {radius} {circularity} {math.dist(pos,prev_pos)/MAX_TRACKING_DIST}")
             continue
-
-        difference_score = abs(radius - prev_r) + abs(circularity - prev_c) * 10
+        
+        print(f"candidate:{area/ball_area} {radius} {circularity} {math.dist(pos,prev_pos)/MAX_TRACKING_DIST}")
+        print(f"contour similarity:{cv2.matchShapes(cnt,prev_cnt,1,0.0)}")
+        difference_score = abs(radius - prev_r) + abs(circularity - prev_c) * 10 + math.dist(pos,prev_pos)/MAX_TRACKING_DIST
+        
+        ellipse = cv2.fitEllipse(cnt)
+        center, axes, angle = ellipse
+        print(f"Center: {center}")
+        print(f"Axes: {axes} (Major, Minor)")
+        print(f"Angle: {angle} degrees")
 
         if difference_score < lowest_diff:
             lowest_diff = difference_score
@@ -377,10 +300,124 @@ def create_point(point_id, set_number, server, receiver, winner, start, end, bou
         "bounces": bounces
     }
 
+def transformed_bounce_side(pos):
+    table_midpoint = 445
+    if pos[1]<table_midpoint: 
+        return "left"
+    else:
+        return "right"
 
+def is_point_over(frames_since_ball, last_bounce_frame, curr_frame, real_fps,analysis_fps, bounces):
+    #if ball tracking gets very robust, maybe track the ball in the whole image, not just over the table and look at bounces on the floor?
+
+    if frames_since_ball > analysis_fps:
+        print(f"{analysis_fps} frames since the last ball detection, point over")
+        return True
+    #NEEDS TUNING
+    if (curr_frame - last_bounce_frame) > 3*real_fps:
+        print(f"{3*real_fps} frames since the last bounce, point over")
+        return True
+
+    #NEEDS TUNING: USE 3 BOUNCES, OR FIX BOUNCE DETECTION...
+    # if len(bounces)>1 and transformed_bounce_side(bounces[-1][0])==transformed_bounce_side(bounces[-2][0]) and bounces[-1][1]-bounces[-2][1] < real_fps/2:
+    #     print("the ball bounced on the same side of the ball in a short timespan, point over")
+    #     return True
+    
+    return False
+
+def remove_large_blobs(mask, max_area=150, kernel_size=10):
+    """
+    Removes large blobs and small blobs that are close enough to be connected by morphological closing.
+
+    Parameters:
+        mask (np.ndarray): Binary input mask.
+        max_area (int): Maximum area to keep blobs.
+        kernel_size (int): Size of the morphological kernel.
+
+    Returns:
+        np.ndarray: Cleaned binary mask.
+    """
+    # Ensure binary
+    mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)[1]
+
+    # Morphological closing to connect close blobs
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    closed_mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+    # Remove large blobs from closed mask
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(closed_mask, connectivity=8)
+    cleaned = np.zeros_like(mask)
+
+    for i in range(1, num_labels):  # Skip background
+        area = stats[i, cv2.CC_STAT_AREA]
+        if area <= max_area:
+            cleaned[labels == i] = 255
+
+    return cleaned
+
+def get_roi_bounds(ball_pos, table_left_end, table_right_end):
+    if ball_pos[0]-TRACKING_WINDOW_WIDTH//2 < table_left_end:
+        roi_topleft = (table_left_end,max(0,ball_pos[1]-int(TRACKING_WINDOW_HEIGHT*1.5)))
+        roi_botright = (table_left_end + TRACKING_WINDOW_WIDTH,table_bottom)
+    
+    elif ball_pos[0]+TRACKING_WINDOW_WIDTH//2 > table_right_end:
+        roi_botright = (table_right_end,table_bottom)
+        roi_topleft = (table_right_end - TRACKING_WINDOW_WIDTH, max(0,ball_pos[1]-int(TRACKING_WINDOW_HEIGHT*1.5)))
+
+    else:
+        roi_topleft = (ball_pos[0]-TRACKING_WINDOW_WIDTH//2,max(0,ball_pos[1]-int(TRACKING_WINDOW_HEIGHT*1.5)))
+        roi_botright = (ball_pos[0]+TRACKING_WINDOW_WIDTH//2,table_bottom)
+
+    return roi_topleft, roi_botright
+
+def is_bounce(ball_history, table_quad,skip_rate):
+    if len(ball_history)<3 or not table_quad.contains(shapely.Point(ball_history[-2].position)):
+        return False
+    
+    t1 = ball_history[-1].frame-ball_history[-2].frame
+    t2 = ball_history[-2].frame-ball_history[-3].frame
+    vel2 = tuple(np.subtract(ball_history[-2].position, ball_history[-3].position))
+    vel3 = tuple(np.subtract(ball_history[-1].position, ball_history[-2].position))
+    # print(f"{t1} {t2}")
+    # print(f"{vel2} {vel3}")
+    if t1==t2==skip_rate and vel2[1]>0 and vel3[1]<0:
+        return True
+    
+    if len(ball_history)>3:
+
+        vel1 = tuple(np.subtract(ball_history[-3].position, ball_history[-4].position))
+        t3 = ball_history[-3].frame-ball_history[-4].frame
+        if (t1==t2==t3==skip_rate and vel1[1]>0 and vel2[1]==0 and vel3[1]<0):
+            return True
+        
+    return False
+
+def get_next_data(iterator):
+    try:
+        item = next(iterator)
+        frame_num = int(item[0])
+        x = int(item[1]['x'])
+        y = int(item[1]['y'])
+        return frame_num, x, y
+    except StopIteration:
+        return None
 
 if __name__ == '__main__':
-    display = True
+    overall_start = time.time()
+    display = False
+    #evaluation stuff
+    BALL_POS_PATH = 'openData/game_3/ball_markup.json'
+    with open(BALL_POS_PATH) as json_file:
+        data = json.load(json_file)
+
+
+    dict_iter = iter(data.items())
+    eval_frame, ball_x, ball_y = get_next_data(dict_iter)
+    tp = 0
+    fp = 0
+    tn = 0
+    fn = 0
+
     # capture = cv2.VideoCapture("myvideos/test60fps.mp4") 
     capture = cv2.VideoCapture("openData/game_3.mp4")
     # capture = cv2.VideoCapture("openData/serve2.mp4")
@@ -388,6 +425,10 @@ if __name__ == '__main__':
     output = cv2.imread('images/output_table_flipped.jpg')
     
     fps = capture.get(cv2.CAP_PROP_FPS)
+
+    backSub = cv2.createBackgroundSubtractorMOG2(varThreshold=14, detectShadows=True, history=int(fps)*10) 
+
+    nr_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
     
     if fps>=60:
         skip_rate = round(fps/60)
@@ -398,9 +439,9 @@ if __name__ == '__main__':
     print(fps)
     print(skip_rate)
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5)) #ONLY FOR GMG!
-    lower = np.array([0, 0, 50])   # Hue doesn't matter, saturation small, value high
-    upper = np.array([179, 160, 255])
+ 
+    lower = np.array([0, 0, 0])   # Hue doesn't matter, saturation small, value high
+    upper = np.array([179, 150, 255])
 
     ball_history = collections.deque()
     history = 10
@@ -410,6 +451,7 @@ if __name__ == '__main__':
     last_high_conf_area = None
     velocity = None
 
+    frame_count = 1
     ret,prev_frame = capture.read()
 
     original_rows = prev_frame.shape[0]
@@ -419,10 +461,14 @@ if __name__ == '__main__':
     scale_x = original_cols / DOWNSAMPLE_COLS
     scale_y = original_rows / DOWNSAMPLE_ROWS
     
-    
-
-    table_quad = find_table.find_table(prev_frame,display=True)
-
+    tries = 0
+    table_quad = None
+    while table_quad is None and tries<100:
+        table_quad = find_table.find_table(prev_frame,display=False)
+        ret,prev_frame = capture.read()
+        tries +=1
+        frame_count += 1
+        print(f"FINDING TABLE ATTEMPT NR:{tries}")  
     
    
     table_coords = [ (int(round(x)), int(round(y))) for x, y in  list(table_quad.exterior.coords) ]
@@ -440,11 +486,6 @@ if __name__ == '__main__':
         shapely.prepare(table_quad)
     else:
         print("table not found")
-
-    # for point in scaled_coords:
-    #     cv2.circle(frame, point, radius=5, color=(0, 255, 0), thickness=-1)
-
-    # cv2.circle(prev_frame, (400,600), radius=5, color=(0, 255, 0), thickness=-1)
 
 
     col_values = [x[0] for x in scaled_coords]
@@ -514,7 +555,6 @@ if __name__ == '__main__':
     prev_frame = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
 
     table_midpoint = 445
-    frame_count = -1
     bounces_this_point = []
     bounces = []
     points_metadata = []
@@ -523,50 +563,72 @@ if __name__ == '__main__':
     receiver = None
     winner = None
     point_start_frame = None
+    last_bounce_frame = None
 
     while True:
         frame_count += 1
-
+       
+        # time1 = time.time()
         ret, frame = capture.read()
+        # time2  =time.time()
+        # print(f"time to read:{time2-time1}s")
         if frame is None:
             break
+        
+        #game 4, complete set
+        # if frame_count<nr_frames*0.43:
+        #     continue
+        
 
+
+        #game 1, complete set
+        # if frame_count<nr_frames*0.08:
+        #     continue
+        
+        # if frame_count>nr_frames*0.57:
+        #     break
+
+
+        #game 3, first set
+        # if frame_count>nr_frames*0.5:
+        #     break
+        
+        #game 3, second set
+        # if frame_count<nr_frames*0.5:
+        #     continue
+
+
+        # if frame_count<nr_frames*0.57:
+        #     continue
+        
         if frame_count % skip_rate != 0:
-            print("skipped")
             continue
 
-        
 
         start_time = time.time()
-
-        
-    
         frame = cv2.resize(frame,(DOWNSAMPLE_COLS,DOWNSAMPLE_ROWS),interpolation=cv2.INTER_AREA)
-
-
-        # gray_frame = frame.copy()
-        # gray_frame = cv2.cvtColor(gray_frame, cv2.COLOR_BGR2GRAY)
-        # frame_diff = cv2.subtract(gray_frame,prev_frame)
-        # prev_frame = gray_frame
-
-        # frame_diff = cv2.GaussianBlur(frame_diff, (7, 7), 1.5)
-        # ret,diff_mask = cv2.threshold(frame_diff,30,255,cv2.THRESH_BINARY)
-        
-
         blur = cv2.GaussianBlur(frame, (3, 3), 1.5)
         # blur = frame
-
-
-
-        fgMask = backSub.apply(blur)
+        fgMask = backSub.apply(blur, learningRate =-1)
         _,fgMask = cv2.threshold(fgMask, 130, 255, cv2.THRESH_BINARY)
+
+
+        if point_started:
+            # cv2.imshow("before",fgMask)
+            fgMask = remove_large_blobs(fgMask)
+            # cv2.imshow("after",fgMask)
+       
 
         # combined2 = cv2.bitwise_and(fgMask, diff_mask)
 
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         white_mask = cv2.inRange(hsv, lower, upper)
         combined = cv2.bitwise_and(fgMask,white_mask)
-        fgMask = combined
+
+        # cv2.imshow("before",combined)
+        # combined = remove_large_blobs(combined)
+        # cv2.imshow("after",combined)
+        # fgMask = combined
         
         # cv2.imshow("backsub",fgMask)
         # cv2.imshow("white",white_mask)
@@ -577,12 +639,40 @@ if __name__ == '__main__':
         # cv2.waitKey(0)
         # cv2.destroyAllWindows()
 
+
         if not point_started:
-            ball_contour = get_ball_contour(fgMask)
+            ball_contour = get_ball_contour(combined)
 
         else:
-            ball_contour = get_ball_during_point(fgMask, ball_history[-1], table_left_end, table_right_end,roi_topleft,roi_botright,last_high_conf_area)
+            ball_contour = get_ball_during_point(combined, fgMask,ball_history[-1], table_left_end, table_right_end,roi_topleft,roi_botright,last_high_conf_area)
         
+
+        #evaluation
+        try:
+            while eval_frame<frame_count:
+                eval_frame, ball_x, ball_y = get_next_data(dict_iter)
+        except:
+            break
+        if frame_count==eval_frame:
+     
+            true_pos = (int(ball_x/scale_x), int(ball_y/scale_y))
+            # print(f"TRUE POSITION:{true_pos}")
+
+            above_table = table_left_end <= true_pos[0] <=table_right_end
+            if point_started:
+                if ball_contour is None:
+                    if (ball_x,ball_y) == (-1,-1) or not above_table:
+                        tn += 1
+                    else:
+                        fn += 1
+                else:
+                    ball_pos = get_cnt_centroid(ball_contour)
+                    if (ball_x,ball_y) != (-1,-1) and above_table and math.dist(true_pos,ball_pos) < 20:
+                        tp += 1
+                    else:
+                        fp += 1
+
+
 
         if ball_contour is not None:
             area = cv2.contourArea(ball_contour)
@@ -595,30 +685,26 @@ if __name__ == '__main__':
             perimeter = cv2.arcLength(ball_contour, True)
             circularity = 4 * math.pi * area / (perimeter ** 2)
             print(f"circularity:{circularity}")
-
-
-
-            # ball_pos = get_cnt_centroid(ball_contour)
-            ball_pos = get_cnt_bottom(ball_contour)
+            ball_pos = get_cnt_centroid(ball_contour)
             print(f"ball pos:{ball_pos}")
 
-
-
-
-            #bounce detection
-            prev_velocity = None
-            if velocity is not None:
-                prev_velocity = velocity
             if len(ball_history)>0:
                 velocity = (ball_pos[0] - ball_history[-1].position[0], ball_pos[1] - ball_history[-1].position[1])
                 print(f"velocity:{velocity}")
             
-            print(f"frames since ball:{frames_since_ball}")
-            if point_started and frames_since_ball == 0 and prev_velocity is not None and prev_velocity[1]>=0 and velocity[1]<0 and table_quad.contains(shapely.Point(ball_history[-1].position)):
+
+            ball_history.append(BallCandidate(radius,circularity,ball_pos, frame_count,ball_contour))
+            if len(ball_history)>history:
+                ball_history.popleft()
+
+       
+            if point_started and is_bounce(ball_history,table_quad,skip_rate):
                 print("BOUNCE")
-                cv2.circle(frame, ball_history[-1].position, radius=2, color=(0, 255, 0), thickness=-1)
-                transformed_pos = cv2.perspectiveTransform(np.float32([ball_history[-1].position]).reshape(-1,1,2),M)
-                bounces_this_point.append((int(transformed_pos[0][0][0]),int(transformed_pos[0][0][1])))
+                last_bounce_frame = frame_count
+                bounce_pos = get_cnt_bottom(ball_history[-2].contour)
+                cv2.circle(frame, bounce_pos, radius=2, color=(0, 255, 0), thickness=-1)
+                transformed_pos = cv2.perspectiveTransform(np.float32([bounce_pos]).reshape(-1,1,2),M)
+                bounces_this_point.append(((int(transformed_pos[0][0][0]),int(transformed_pos[0][0][1])), frame_count))
                 print(transformed_pos)
                 print(transformed_pos[0][0])
                 if display:
@@ -629,23 +715,18 @@ if __name__ == '__main__':
 
 
 
-
-            print(point_side(midpoint2,midpoint1, ball_pos))
-            if (table_quad.contains(shapely.Point(ball_pos))):
-                print("ball is on the table!")
-
-            
-
-            ball_history.append(BallCandidate(radius,circularity,ball_pos))
-            if len(ball_history)>history:
-                ball_history.popleft()
-
+            #MOVED THIS HERE SO WE SEE THE ROI USED FOR THE CURRECT DETECTION, NOT THE UPDATED ONE
+            # combined = cv2.cvtColor(combined,cv2.COLOR_GRAY2RGB)
+            # if display and point_started:
+            #     print("?????")
+            #     print(roi_topleft)
+            #     print(roi_botright)
+            #     cv2.rectangle(combined, roi_topleft,roi_botright, (0,255,0),3)
             if point_started:
                 # frames_since_ball = 0
-                roi_topleft = (ball_pos[0]-TRACKING_WINDOW_WIDTH,ball_pos[1]-TRACKING_WINDOW_HEIGHT)
-                roi_botright = (ball_pos[0]+TRACKING_WINDOW_WIDTH,table_bottom)
-
-            
+                roi_topleft, roi_botright = get_roi_bounds(ball_pos, table_left_end, table_right_end)
+               
+         
             if len(ball_history)>1 and frames_since_ball<10:
                 prev_pos = ball_history[-2].position
                 displacement_vector = tuple(np.subtract(ball_pos, prev_pos))
@@ -653,9 +734,10 @@ if __name__ == '__main__':
                 #there could be multiple circular objects in the frame etc. this should be improved: makes sure detections are near each other?
                 #the change in x is completely arbitrary... do that differently
 
-                near_vertical = (vector_length(displacement_vector) < 5) or (displacement_vector[1]!=0 and abs(math.atan(displacement_vector[0]/displacement_vector[1])) < math.pi/4)
+                # near_vertical = (vector_length(displacement_vector) < 5) or (displacement_vector[1]!=0 and abs(math.atan(displacement_vector[0]/displacement_vector[1])) < math.pi/4)
 
-                if circularity > 0.85 and math.dist(ball_pos, prev_pos) < MAX_DIST_FROM_PREVIOUS_POS and near_vertical and (ball_pos[0]<=inner_left or ball_pos[0]>=inner_right) and not table_quad.contains(shapely.Point(ball_pos)):
+                if circularity > 0.85 and math.dist(ball_pos, prev_pos) < MAX_DIST_FROM_PREVIOUS_POS and (ball_pos[0]<=inner_left or ball_pos[0]>=inner_right) and not table_quad.contains(shapely.Point(ball_pos)):
+                    print(f"HIGH CONF AREA: {area}")
                     print(f"displacement:{displacement_vector}")
                     frames_since_ball = 0
                     high_confidence_count += 1
@@ -668,7 +750,7 @@ if __name__ == '__main__':
             frames_since_ball += 1
         
 
-        if high_confidence_count >=3 and not point_started:
+        if high_confidence_count >=1 and not point_started:
             if point_side(midpoint2,midpoint1, ball_pos)=="left":
                 server = "left"
                 receiver = "right"
@@ -677,21 +759,39 @@ if __name__ == '__main__':
                 receiver = "left"
                 
             point_start_frame = frame_count
+            last_bounce_frame = frame_count
             print("point started!")
             bounces_this_point.clear()
             point_started = True
             high_confidence_count = 0
             last_high_conf_area = area
-            if ball_pos[0] < DOWNSAMPLE_COLS//2:
-                roi_topleft = (ball_pos[0]-30,ball_pos[1]-50)
-                roi_botright = (ball_pos[0]+TRACKING_WINDOW_WIDTH,table_bottom)
-            else:
-                roi_topleft = (ball_pos[0]-TRACKING_WINDOW_WIDTH,ball_pos[1]-50)
-                roi_botright = (ball_pos[0]+30,table_bottom)
+            print(f"HIGH CONF AREA: {area}")
+            roi_topleft, roi_botright = get_roi_bounds(ball_pos, table_left_end, table_right_end)
+
 
 
         if frames_since_ball>10:
             high_confidence_count = 0   
+
+        
+
+        if point_started and is_point_over(frames_since_ball,last_bounce_frame,frame_count,fps,analysis_fps,bounces_this_point):
+            print("point over")
+            point_started = False
+            if len(bounces_this_point)>0:
+                if bounces_this_point[-1][0][1]<table_midpoint: #bounced on the left side for the last time
+                    winner = "right"
+                else:
+                    winner = "left"
+
+                print("proper point, added to stats")
+
+                just_bounce_positions = [x[0] for x in bounces_this_point]
+                points_metadata.append(create_point(1,1,server,receiver,winner,point_start_frame,frame_count,just_bounce_positions))
+                print(points_metadata[-1])
+                bounces.append(bounces_this_point.copy())
+                
+        
 
         #if the ball hasn't been seen in 1s, the point should be over?
         if frames_since_ball > analysis_fps:
@@ -699,50 +799,29 @@ if __name__ == '__main__':
             last_high_conf_area = None
             ball_history.clear()
 
-            if point_started:
-                print("point over")
-                point_started = False
-                if len(bounces_this_point)>0:
-                    if bounces_this_point[-1][1]<table_midpoint: #bounced on the left side for the last time
-                        winner = "right"
-                    else:
-                        winner = "left"
-
-                    print("proper point, added to stats")
-                    points_metadata.append(create_point(1,1,server,receiver,winner,point_start_frame,frame_count,bounces_this_point.copy()))
-                    print(points_metadata[-1])
-                    bounces.append(bounces_this_point.copy())
-                
-        
-
-
-
-
-
-        fgMask = cv2.cvtColor(fgMask,cv2.COLOR_GRAY2RGB)
 
         end_time = time.time()
-        print(f"time per frame:{end_time-start_time}s")
+        # print(f"time per frame:{end_time-start_time}s")
 
 
-        
         if display:
+            combined = cv2.cvtColor(combined,cv2.COLOR_GRAY2RGB)
             for point in scaled_coords:
                 cv2.circle(frame, point, radius=1, color=(0, 255, 0), thickness=-1)
 
             if point_started:
-                cv2.rectangle(fgMask, roi_topleft,roi_botright, (0,255,0),3)
+                cv2.rectangle(combined, roi_topleft,roi_botright, (0,255,0),3)
 
 
             cv2.drawContours(frame, ball_contour, -1, (0, 0, 255), 1)
-            cv2.drawContours(fgMask, ball_contour, -1, (0, 0, 255), 4)
+            cv2.drawContours(combined, ball_contour, -1, (0, 0, 255), 1)
         
             cv2.namedWindow("Frame difference", cv2.WINDOW_NORMAL)
             cv2.resizeWindow("Frame difference", 800, 600)
             cv2.imshow('Frame difference', frame)
             cv2.namedWindow("mask", cv2.WINDOW_NORMAL)
             cv2.resizeWindow("mask", 800, 600)
-            cv2.imshow('mask', fgMask)
+            cv2.imshow('mask', combined)
 
 
             key = cv2.waitKey(0) & 0xFF
@@ -752,6 +831,19 @@ if __name__ == '__main__':
     capture.release()
     cv2.destroyAllWindows()
 
+
+
     print(points_metadata)
     stats.get_stats(points_metadata)
+
+    precision = tp/(tp+fp)
+    recall = tp/(tp+fn)
+    print(f"precision:{precision}")
+    print(f"recall:{recall}")
+    print(tp)
+    print(tn)
+    print(fp)
+    print(fn)
+    overall_end = time.time()
+    print(f"processing time:{overall_end-overall_start}")
     # stats.calculate(midpoint1,midpoint2,bounces)
