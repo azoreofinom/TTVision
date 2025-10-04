@@ -8,8 +8,8 @@ import itertools
 import matplotlib.pyplot as plt
 import networkx as nx
 
-LINE_CONNECTION_DIST = 100 #max distance between the endpoints of 2 lines which should be connected. this greatly influences the number of potential lines
-MIN_LINE_LENGTH = 50 #the minimum length of a line segment for it to be considered a potential side of the table (before extension)
+#LINE_CONNECTION_DIST = 100 #max distance between the endpoints of 2 lines which should be connected. this greatly influences the number of potential lines
+#MIN_LINE_LENGTH = 50 #the minimum length of a line segment for it to be considered a potential side of the table (before extension)
 MAX_LINES_TO_PROCESS = 80 #finding all the 4 segment combinations from more than 80 lines takes forever
 
 class HoughBundler:     
@@ -503,6 +503,7 @@ def get_top_longest_lines(segments):
 
 def find_white_lines_and_largest_contour(white_mask,original,maxGap=3,minHoughLine=15,display=False):
     asd = original.copy()
+    scaling_ratio = original.shape[0] / 1080
     # ,(946,345,939,360)
 
     # testLines = [(338,399,205,476),(218,478,930,489),(879,413,965,487),(420,397,804,406), (403,349,403,365),(946,345,939,360),(946,489,962,488),(603,384,595,399),(970,399,990,395),(833,513,833,528),(536,513,551,513)] #last element is the extra line
@@ -556,7 +557,7 @@ def find_white_lines_and_largest_contour(white_mask,original,maxGap=3,minHoughLi
     # cv2.destroyAllWindows()
 
 
-    lines = cv2.HoughLinesP(white_mask, rho=1, theta=np.pi / 180, threshold=50,
+    lines = cv2.HoughLinesP(white_mask, rho=1, theta=np.pi / 180, threshold=int(50*scaling_ratio),
                             minLineLength=minHoughLine, maxLineGap=maxGap) #lower angle resolution, less issues with jagged lines? ( they count as one line)
     if lines is None:
         # if display:
@@ -582,7 +583,7 @@ def find_white_lines_and_largest_contour(white_mask,original,maxGap=3,minHoughLi
     
 
 
-    bundler = HoughBundler(min_distance=100,min_angle=5)
+    bundler = HoughBundler(min_distance=100*scaling_ratio,min_angle=5)
 
     start = time.time()
     lines = bundler.process_lines(lines)
@@ -725,7 +726,8 @@ def find_table(img, display=False):
 #2. how to remove double lines?
 #3. speed up quad finding (only look at the longest lines, quick test?)
 #4. add conditions to check if it's probably the table?
-
+    scaling_ratio = img.shape[0] / 1080
+    print(f"SCALING RATIO:{scaling_ratio}")
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
     v_channel = hsv[:, :, 2]
@@ -778,7 +780,10 @@ def find_table(img, display=False):
 
     thin_edges = cv2.ximgproc.thinning(edges,thinningType=0)
     thin_mask = cv2.ximgproc.thinning(mask,thinningType=0)
-    combined2 = cv2.bitwise_and(edges,mask)
+    # combined2 = cv2.bitwise_and(edges,mask)
+
+    #TESTING!!!
+    combined2 = edges
 
     if display:
         cv2.imshow('original',img)
@@ -803,6 +808,10 @@ def find_table(img, display=False):
 
     minHough = [60,50,40,30]
     gaps = [4,5,6,7,10]
+
+    minHough = [int(x*scaling_ratio) for x in minHough]
+    gaps = [int(x*scaling_ratio) for x in gaps]
+
 
     #threshold and angle resolution parameters?
 

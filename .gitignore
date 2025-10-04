@@ -21,6 +21,7 @@ tempCodeRunnerFile.py
 /test.py
 /test_quad.py
 /test_contour_removal.py
+/trajectory_tracker.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
