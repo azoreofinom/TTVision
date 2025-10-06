@@ -137,11 +137,7 @@ def get_ball_candidates(frame_mask):
     return good_contours, contour_inside_table
 
 
-def get_ball_during_point(frame_mask,hsv,ball_history,left,right,roi_l,roi_r,ball_area,predicted_positions):
-    #find contour in roi which is closest in radius and circ to previous? circ closeness is not reliable!
-    #roi needs to be large enough to allow for change of direction after hit
-    #extension: instead of simple roi, consider parabola?
-    
+def get_ball_during_point(frame_mask,hsv,ball_history,left,right,roi_l,roi_r,ball_area,predicted_positions,possible_x_range):
     if len(ball_history)>0:
         prev_ball = ball_history[-1]
         prev_r = prev_ball.radius
@@ -154,23 +150,9 @@ def get_ball_during_point(frame_mask,hsv,ball_history,left,right,roi_l,roi_r,bal
     roi_botright = roi_r
     roi = frame_mask[roi_topleft[1]:roi_botright[1], roi_topleft[0]:roi_botright[0]]
     roi_contours, _ = cv2.findContours(roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE, offset=roi_topleft)
-
-    
-    # full_roi = full_mask[roi_topleft[1]:roi_botright[1], roi_topleft[0]:roi_botright[0]]
-    #full_contours, _ = cv2.findContours(full_roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE, offset=roi_topleft)
-
-    #TRYING TO GET ALL CONTOURS, NOT JUST FROM ROI, TO AVOID PART OF ARM/BAT BEING DETECTED(this doesn't matter anymore)
-    #full_contours, _ = cv2.findContours(full_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-
-
     contours = roi_contours
-    # print(f"nr of contours:{len(contours)}")
-   
-
     best_contour = None
-   
     shortest_dist = float('inf')
-    
 
     for i,cnt in enumerate(contours):
         pos = get_cnt_centroid(cnt)
@@ -196,12 +178,20 @@ def get_ball_during_point(frame_mask,hsv,ball_history,left,right,roi_l,roi_r,bal
             print(f"excluded candidate:{area/ball_area} {radius} {circularity}") #{math.dist(pos,prev_pos)/MAX_TRACKING_DIST}")
             continue
         
-        if len(ball_history)>0 and color[2]<0.4*prev_color[2]: #filtering shadows...this could be much better, I'm sure
-            print(f"excluded due to color:{color}")
-            continue
+        if len(ball_history)>0:
+            if color[2]<0.4*prev_color[2]: #filtering shadows...this could be much better, I'm sure
+                print(f"excluded due to color:{color}")
+                continue
+
+            if pos[0]==prev_pos[0]:
+                print(f"excluded,same pos")
+                continue
+
+            if not (pos[0]>=possible_x_range[0] and pos[0]<=possible_x_range[1]):
+                print(f"excluded,wrong direction")
+                continue
 
         #print(f"candidate:{area/ball_area} {radius} {circularity}") #{math.dist(pos,prev_pos)/MAX_TRACKING_DIST}")
-        #print(f"contour similarity:{cv2.matchShapes(cnt,prev_cnt,1,0.0)}")
         ellipse = cv2.fitEllipse(cnt)
         center, axes, angle = ellipse
         #print(f"Center: {center}")
@@ -220,10 +210,6 @@ def get_ball_during_point(frame_mask,hsv,ball_history,left,right,roi_l,roi_r,bal
         if dist < shortest_dist:
             shortest_dist = dist
             best_contour = cnt
-
-    # if best_contour is not None:
-    #     pos = get_cnt_centroid(best_contour)
-    #     print(f"% move:{math.dist(pos,prev_pos)/(table_right_end-table_left_end)}")
     return best_contour
 
 
@@ -345,13 +331,13 @@ def preprocess_frame(back_sub,frame):
 
 def point_side(a, b, p):
     # a, b, p: tuples (x, y)
+    #put coliniear case to the left side, just to make this easier
     val = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
-    if val > 0:
+    if val >= 0:
         return "left"
-    elif val < 0:
-        return "right"
     else:
-        return "colinear"
+        return "right"
+    
     
 
 def create_point(point_id, set_number, server, receiver, winner, start, end, bounces):
@@ -606,6 +592,35 @@ def point_is_starting(serve_like_events, cnt_on_table,frame_count,real_fps,hsv):
     
     return False
 
+def get_possible_x_range(ball_history,server):
+    if len(ball_history)==0:
+        return [0,DOWNSAMPLE_COLS]
+    prev_pos = ball_history[-1].position
+    side = point_side(midpoint2,midpoint1,prev_pos)
+    print(f"ball side:{side}")
+    
+    if len(ball_history)==1: #or 1?
+        if server=="left":
+            return [prev_pos[0],DOWNSAMPLE_COLS]
+        else:
+            return [0,prev_pos[0]]
+    else:
+        velocity = tuple(np.subtract(ball_history[-1].position, ball_history[-2].position))
+        print(f"velocity:{velocity}")
+        if side=="left" and velocity[0]>0:
+            return [prev_pos[0],DOWNSAMPLE_COLS]
+        elif side=="right" and velocity[0]<0:
+            return [0,prev_pos[0]]
+        
+        #this is specific to when only tracking inside table bounds
+
+        if prev_pos[0]+velocity[0]<table_left_end:
+            return [prev_pos[0],DOWNSAMPLE_COLS]
+        elif prev_pos[0]+velocity[0]>table_right_end:
+            return [0,prev_pos[0]]
+    
+    return [0,DOWNSAMPLE_COLS]
+
 if __name__ == '__main__':
     overall_start = time.time()
     display = True
@@ -647,8 +662,6 @@ if __name__ == '__main__':
     print(skip_rate)
 
  
-    lower = np.array([0, 0, 0])   # Hue doesn't matter, saturation small, value high
-    upper = np.array([179, 50, 255])
 
     ball_history = collections.deque()
     history = 10
@@ -689,9 +702,7 @@ if __name__ == '__main__':
     print(np.int32([table_coords]))
     table_mask = np.zeros((height, width), dtype=np.uint8)
     cv2.polylines(table_mask,np.int32([table_coords]), True, 255)
-    # cv2.imshow("table mask",table_mask)
-
-    
+   
 
     scaled_coords = [(int(x/scale_x), int(y/scale_y)) for x,y in table_coords]
     table_coords=scaled_coords
@@ -784,7 +795,6 @@ if __name__ == '__main__':
     print(transformed_left)
     
 
-    # cv2.imshow("asd",prev_frame)
     prev_frame = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
 
     table_midpoint = 445
@@ -798,11 +808,9 @@ if __name__ == '__main__':
     point_start_frame = None
     last_bounce_frame = None
     predicted_positions = None
-
-
     serve_candidates = []
     serve_like_events = []
-
+    possible_x_range = [0,DOWNSAMPLE_COLS]
     
 
     while True:
@@ -848,6 +856,10 @@ if __name__ == '__main__':
         # if frame_count<nr_frames*0.57:
         #     continue
         
+
+        if frame_count<nr_frames*0.06:
+            continue
+
         if frame_count % skip_rate != 0:
             continue
 
@@ -906,7 +918,7 @@ if __name__ == '__main__':
             ball_candidates, cnt_on_table = get_ball_candidates(combined)
             serve_candidates = update_serve_candidates(serve_candidates,ball_candidates,frame_count,table_quad,serve_like_events,hsv)
         else:
-            ball_contour = get_ball_during_point(combined, hsv,ball_history, table_left_end, table_right_end,roi_topleft,roi_botright,last_high_conf_area, predicted_positions)
+            ball_contour = get_ball_during_point(combined, hsv,ball_history, table_left_end, table_right_end,roi_topleft,roi_botright,last_high_conf_area, predicted_positions,possible_x_range)
    
         # ball_contour = ball_candidates
 
@@ -989,6 +1001,8 @@ if __name__ == '__main__':
                 if len(ball_history)>history:
                     ball_history.popleft()
 
+                possible_x_range = get_possible_x_range(ball_history,server)
+                print(possible_x_range)
                 predicted_positions = get_new_predicted_positions(bounces_this_point,ball_history,server,transformed_left,transformed_right,table_length,skip_rate)
 
                 if is_bounce(ball_history,table_quad,skip_rate):
@@ -1050,7 +1064,8 @@ if __name__ == '__main__':
                 ball_history.append(BallCandidate(1,1,ball_pos, frame_count,ball_contour,ball_color))
                 serve_candidates.clear()
                 serve_like_events.clear()
-                
+                print(possible_x_range)
+
                 if point_side(midpoint2,midpoint1, ball_pos)=="left":
                     server = "left"
                     receiver = "right"
@@ -1058,10 +1073,13 @@ if __name__ == '__main__':
                     server = "right"
                     receiver = "left"
                 
+
+                possible_x_range = get_possible_x_range(ball_history,server)
                 predicted_positions = get_new_predicted_positions(bounces_this_point,ball_history,server,transformed_left,transformed_right,table_length,skip_rate)
                 point_start_frame = frame_count
                 last_bounce_frame = frame_count
                 print("point started!")
+                print(server)
                 bounces_this_point.clear()
                 point_started = True
                 high_confidence_count = 0
