@@ -1,12 +1,13 @@
-import cv2
-import numpy as np
+import itertools
 import math
 import random
-import shapely
 import time
-import itertools
+
+import cv2
 import matplotlib.pyplot as plt
 import networkx as nx
+import numpy as np
+import shapely
 
 #LINE_CONNECTION_DIST = 100 #max distance between the endpoints of 2 lines which should be connected. this greatly influences the number of potential lines
 #MIN_LINE_LENGTH = 50 #the minimum length of a line segment for it to be considered a potential side of the table (before extension)
