@@ -348,7 +348,7 @@ def is_bounce(ball_history, table_quad,skip_rate):
 def is_possible_distortion(ball_radius, contour):
     pass
 
-def get_new_predicted_positions(bounces,ball_history,server,left_serve_pos,right_serve_pos,table_length,skip_rate):
+def get_new_predicted_positions(curr_frame,ball_history,server,left_serve_pos,right_serve_pos,table_length,skip_rate):
     if len(ball_history)==0:
         if server=="left":
             return [left_serve_pos]
@@ -363,8 +363,10 @@ def get_new_predicted_positions(bounces,ball_history,server,left_serve_pos,right
         
         return [tuple(np.add(np.array(ball_history[-1].position), np.array(predicted_velocity)).tolist())]
     
+
+
     else:
-        if (ball_history[-1].frame - ball_history[-2].frame) == skip_rate:
+        if ball_history[-1].frame == curr_frame and (ball_history[-1].frame - ball_history[-2].frame) == skip_rate:
             velocity = tuple(np.subtract(ball_history[-1].position, ball_history[-2].position))
             pred1 = tuple(np.add(np.array(ball_history[-1].position), np.array(velocity)).tolist())
             pred2 = tuple(np.subtract(np.array(ball_history[-1].position), np.array(velocity)).tolist())
@@ -482,7 +484,7 @@ def update_serve_candidates(serve_candidates, ball_candidates, frame_count,table
 
 def point_is_starting(mask, strict_table_quad, serve_like_events, contours_inside_table,frame_count,real_fps,hsv, midpoint1,midpoint2):
     if len(serve_like_events)==0 or len(contours_inside_table)==0:
-        return False, None, None
+        return False, None, None, None
     
     
     for cnt_on_table in contours_inside_table:
@@ -507,8 +509,8 @@ def point_is_starting(mask, strict_table_quad, serve_like_events, contours_insid
             # print(serve_event)
 
 
-            if (frame_count - serve_event.frame < 1.1*real_fps and point_side(midpoint2,midpoint1, serve_pos)==inside_side 
-                and 0.8<inside_area/serve_area<5 and color[2]>0.4*serve_event.color[2] and abs(color[1]-serve_event.color[1])<MAX_COLOR_DIFF):
+            if (frame_count - serve_event.frame < 1.1*real_fps  
+                and 0.8<inside_area/serve_area<5 and color[2]>0.4*serve_event.color[2] and abs(color[1]-serve_event.color[1])<MAX_COLOR_DIFF): #and point_side(midpoint2,midpoint1, serve_pos)==inside_side:
                 print("serve color diff")
                 print(serve_event.color)
                 print(color)
@@ -518,10 +520,10 @@ def point_is_starting(mask, strict_table_quad, serve_like_events, contours_insid
 
                 serve_like_events.remove(serve_event) #it shouldn't be reused. if early exit, don't repeat 
 
-                return True, serve_area, cnt_on_table
+                return True, serve_area, serve_pos, cnt_on_table
 
     
-    return False, None, None
+    return False, None, None, None
 
 def get_possible_x_range(ball_history,server, midpoint1,midpoint2,table_left_end,table_right_end):
     if len(ball_history)==0:
@@ -574,8 +576,8 @@ def timestamp_to_framecount(filepath,fps):
 def main():
 
     overall_start = time.time()
-    display = True
-    eval = False
+    display = False
+    eval = True
     #evaluation stuff
     BALL_POS_PATH = 'openData/game_3/ball_markup.json'
     with open(BALL_POS_PATH) as json_file:
@@ -593,9 +595,9 @@ def main():
 
     # capture = cv2.VideoCapture("myvideos/test60fps.mp4") 
     #capture = cv2.VideoCapture("myvideos/random.mkv")
-    # capture = cv2.VideoCapture("openData/game_3.mp4")
+    capture = cv2.VideoCapture("openData/game_3.mp4")
     # capture = cv2.VideoCapture("openData/serve2.mp4")
-    capture = cv2.VideoCapture("myvideos/wtt2.webm")
+    # capture = cv2.VideoCapture("myvideos/wtt2.webm")
     output = cv2.imread('images/output_table_flipped.jpg')
 
     
@@ -676,14 +678,14 @@ def main():
     print(f"scaled:{scaled_coords}")
     table_quad = shapely.Polygon(scaled_coords)
 
-    strict_table_quad = table_quad.buffer(2, join_style="mitre")
+    strict_table_quad = table_quad.buffer(0, join_style="mitre")
     #this should help include bounces which are right on the boundary of the table
     table_quad = table_quad.buffer(2, join_style="mitre")
 
     
-
     if table_quad:
         shapely.prepare(table_quad)
+        shapely.prepare(strict_table_quad)
     else:
         print("table not found")
 
@@ -793,8 +795,8 @@ def main():
         #time2  =time.time()
 
 
-        if not is_table_view(frame,table_mask):
-            continue
+        # if not is_table_view(frame,table_mask):
+        #     continue
         
         #print(f"time to read:{time2-time1}s")
         if frame is None:
@@ -948,7 +950,7 @@ def main():
                 # print(f"time for color:{end_time1-start_time1}s")
 
                 # start_time1 = time.time()
-                # print(f"COLOR2:{get_cnt_color2(ball_contour,hsv)}")
+                print(f"COLOR2:{get_cnt_color2(ball_contour,hsv)}")
                 # end_time1 = time.time()
                 # print(f"time for color2:{end_time1-start_time1}s")
                 # print(f"median color:{get_cnt_median_color(ball_contour,hsv)}")
@@ -974,7 +976,7 @@ def main():
 
                 possible_x_range = get_possible_x_range(ball_history,server,midpoint1,midpoint2,table_left_end,table_right_end)
                 print(possible_x_range)
-                predicted_positions = get_new_predicted_positions(bounces_this_point,ball_history,server,transformed_left,transformed_right,table_length,skip_rate)
+                #predicted_positions = get_new_predicted_positions(frame_count,ball_history,server,transformed_left,transformed_right,table_length,skip_rate)
 
                 if is_bounce(ball_history,table_quad,skip_rate):
                     print("BOUNCE")
@@ -1008,6 +1010,8 @@ def main():
                 frames_since_ball += 1
 
 
+            predicted_positions = get_new_predicted_positions(frame_count,ball_history,server,transformed_left,transformed_right,table_length,skip_rate)
+
             if is_point_over(frames_since_ball,last_bounce_frame,frame_count,fps,analysis_fps,bounces_this_point,ball_history):
                 print("point over")
                 point_started = False
@@ -1026,9 +1030,8 @@ def main():
                 
 
         else:
-            point_starting, toss_area, cnt_on_table =  point_is_starting(fgMask,strict_table_quad,serve_like_events,contours_inside_table,frame_count,fps,hsv, midpoint1, midpoint2)
+            point_starting, toss_area, toss_pos, cnt_on_table =  point_is_starting(fgMask,strict_table_quad,serve_like_events,contours_inside_table,frame_count,fps,hsv, midpoint1, midpoint2)
             if point_starting:
-                print(frame_count)
                 #serve detection evaluation
                 found_timestamp = False
                 for timestamp in serve_timestamps:
@@ -1052,7 +1055,8 @@ def main():
                 #not clearing, old serve events just get removed constantly anyway
                 #serve_like_events.clear()
 
-                if point_side(midpoint2,midpoint1, ball_pos)=="left":
+                
+                if point_side(midpoint2,midpoint1, toss_pos)=="left":
                     server = "left"
                     receiver = "right"
                 else:
@@ -1061,13 +1065,12 @@ def main():
                 
 
                 possible_x_range = get_possible_x_range(ball_history,server,midpoint1,midpoint2,table_left_end,table_right_end)
-                predicted_positions = get_new_predicted_positions(bounces_this_point,ball_history,server,transformed_left,transformed_right,table_length,skip_rate)
+                predicted_positions = get_new_predicted_positions(frame_count,ball_history,server,transformed_left,transformed_right,table_length,skip_rate)
                 point_start_frame = frame_count
                 last_bounce_frame = frame_count
                 print("point started!")
                 bounces_this_point.clear()
                 point_started = True
-                high_confidence_count = 0
                 last_high_conf_area = toss_area
                 print(f"HIGH CONF AREA: {toss_area}")
                 roi_topleft, roi_botright = get_roi_bounds(ball_pos, table_left_end, table_right_end, table_bottom)
