@@ -48,7 +48,7 @@ MAX_DIST_FROM_PREVIOUS_POS  = DOWNSAMPLE_COLS // 20
 TRACKING_WINDOW_HEIGHT = DOWNSAMPLE_ROWS // 4
 TRACKING_WINDOW_WIDTH = DOWNSAMPLE_COLS // 4
 MAX_TRACKING_DIST = math.sqrt(TRACKING_WINDOW_HEIGHT**2 + TRACKING_WINDOW_WIDTH**2)
-MAX_COLOR_DIFF = 150
+MAX_COLOR_DIFF = 100
 
 MAX_AREA_RATIO = 15
 
@@ -146,8 +146,9 @@ def get_ball_during_point(frame_mask,hsv,ball_history,left,right,roi_l,roi_r,bal
             continue
         
         if len(ball_history)>0:
-            if color[2]<0.4*prev_color[2] or (abs(color[0]-prev_color[0]) + abs(color[1]-prev_color[1]))>MAX_COLOR_DIFF:            #or abs(color[1]-prev_color[1])>100: #filtering shadows...this could be much better, I'm sure. saturation seems to change a lot by lighting??
+            if color[2]<0.4*prev_color[2] or  abs(color[1]-prev_color[1])>MAX_COLOR_DIFF:            #or abs(color[1]-prev_color[1])>100: #filtering shadows...this could be much better, I'm sure. saturation seems to change a lot by lighting??
                 print(f"excluded due to color:{color}")
+                print(get_cnt_color(cnt,hsv))
                 continue
 
             if pos[0]==prev_pos[0]:
@@ -513,7 +514,7 @@ def point_is_starting(mask, strict_table_quad, serve_like_events, cnt_on_table,f
 
 
         if (frame_count - serve_event.frame < 1.1*real_fps and point_side(midpoint2,midpoint1, serve_pos)==inside_side 
-            and 0.8<inside_area/serve_area<5 and color[2]>0.4*serve_event.color[2] and (abs(color[0]-serve_event.color[0]) + abs(color[1]-serve_event.color[1]))<MAX_COLOR_DIFF):
+            and 0.8<inside_area/serve_area<5 and color[2]>0.4*serve_event.color[2] and abs(color[1]-serve_event.color[1])<MAX_COLOR_DIFF):
             print("serve color diff")
             print(serve_event.color)
             print(color)
@@ -580,7 +581,7 @@ def main():
 
     overall_start = time.time()
     display = True
-    eval = True
+    eval = False
     #evaluation stuff
     BALL_POS_PATH = 'openData/game_3/ball_markup.json'
     with open(BALL_POS_PATH) as json_file:
@@ -597,8 +598,8 @@ def main():
     serve_fp = 0
 
     # capture = cv2.VideoCapture("myvideos/test60fps.mp4") 
-    # capture = cv2.VideoCapture("myvideos/random.mkv")
-    capture = cv2.VideoCapture("openData/game_3.mp4")
+    capture = cv2.VideoCapture("myvideos/random.mkv")
+    # capture = cv2.VideoCapture("openData/game_3.mp4")
     # capture = cv2.VideoCapture("openData/serve2.mp4")
     # capture = cv2.VideoCapture("myvideos/wtt2.webm")
     output = cv2.imread('images/output_table_flipped.jpg')
@@ -1108,7 +1109,7 @@ def main():
 
         
 
-        if display or mistake:
+        if display: #or mistake:
             combined = cv2.cvtColor(combined,cv2.COLOR_GRAY2RGB)
             for point in scaled_coords:
                 cv2.circle(frame, point, radius=1, color=(0, 255, 0), thickness=-1)
