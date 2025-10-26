@@ -9,6 +9,7 @@ gray_frames/
 myvideos/
 openData/
 images/
+old/
 
 #files to ignore for now
 /CSRT_tracker_on_back_sub.py

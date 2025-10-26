@@ -11,6 +11,7 @@ import numpy as np
 import shapely
 
 import find_table
+import fast_find_table
 import stats
 
 
@@ -576,7 +577,7 @@ def timestamp_to_framecount(filepath,fps):
 def main():
 
     overall_start = time.time()
-    display = False
+    display = True
     eval = True
     #evaluation stuff
     BALL_POS_PATH = 'openData/game_3/ball_markup.json'
@@ -594,8 +595,8 @@ def main():
     serve_fp = 0
 
     # capture = cv2.VideoCapture("myvideos/test60fps.mp4") 
-    #capture = cv2.VideoCapture("myvideos/random.mkv")
-    capture = cv2.VideoCapture("openData/game_3.mp4")
+    # capture = cv2.VideoCapture("myvideos/random.mkv")
+    capture = cv2.VideoCapture("openData/game_2.mp4")
     # capture = cv2.VideoCapture("openData/serve2.mp4")
     # capture = cv2.VideoCapture("myvideos/wtt2.webm")
     output = cv2.imread('images/output_table_flipped.jpg')
@@ -652,7 +653,8 @@ def main():
         #for WTT specifically
         if frame_count>50:
             # prev_frame = cv2.resize(prev_frame,(DOWNSAMPLE_COLS,DOWNSAMPLE_ROWS),interpolation=cv2.INTER_AREA)
-            table_quad = find_table.find_table(prev_frame,display=False)
+            #table_quad = find_table.find_table(prev_frame,display=False)
+            table_quad = fast_find_table.find_table(prev_frame,display=False)
             tries +=1
         ret,prev_frame = capture.read()
         frame_count += 1
