@@ -30,8 +30,13 @@ LINE_EXTENSION_PERCENTAGE = 0.5
 #Absolute distance limit for connecting 2 lines
 LINE_EXTENSION_LIMIT = 50
 
-MIN_ORIENTATION_DIFF = 20
+MIN_ORIENTATION_DIFF = 1
 
+class Line:
+    def __init__(self, ends, color, orientation):
+        self.ends = ends
+        self.color = color
+        self.orientation = orientation
 
 class HoughBundler:     
     def __init__(self,lab_img, max_distance=5, max_angle=2):
@@ -51,32 +56,31 @@ class HoughBundler:
 
         lmag = math.sqrt(math.pow((x2 - x1), 2) + math.pow((y2 - y1), 2))
         perpendicular_distance = abs((y2-y1)*x0 - (x2-x1)*y0 + x2*y1 - y2*x1)/lmag
-        # print(f"perpend dist:{perpendicular_distance}")
         return perpendicular_distance <= COLLINEARITY_DIST
     
     
 
     
     def check_is_line_different(self, line_1, groups, max_distance_to_merge, max_angle_to_merge):
-        orientation_1 = self.get_orientation(line_1)
+        orientation_1 = line_1.orientation
         not_found_group = True
-        avg_line_color = average_color_on_line(self.lab_img,line_1)
+        avg_line_color = line_1.color
        
         for group in groups:
-            orientation_2 = self.get_orientation(group[0])
+            orientation_2 = group[0].orientation
            
-            group_color = average_color_on_line(self.lab_img,group[-1])
+            group_color = group[-1].color
 
             large_angle = max(orientation_1,orientation_2)
             small_angle = min(orientation_1,orientation_2)
             orientation_diff = min(abs(orientation_1 - orientation_2), (180-large_angle)+small_angle)
           
 
-            if  orientation_diff > max_angle_to_merge or not self.are_collinear(group[0],line_1,)  or  abs(math.dist(avg_line_color,group_color )) > MAX_LAB_COLOR_DIST:
+            if  orientation_diff > max_angle_to_merge or not self.are_collinear(group[0].ends,line_1.ends)  or  abs(math.dist(avg_line_color,group_color )) > MAX_LAB_COLOR_DIST:
                 continue
             for line_2 in group:
         
-                if self.get_distance(line_2, line_1) < max_distance_to_merge or get_intersection((line_1[0],line_1[1]),(line_1[2],line_1[3]),(line_2[0],line_2[1]),(line_2[2],line_2[3])):
+                if self.get_distance(line_2.ends, line_1.ends) < max_distance_to_merge or get_intersection((line_1.ends[0],line_1.ends[1]),(line_1.ends[2],line_1.ends[3]),(line_2.ends[0],line_2.ends[1]),(line_2.ends[2],line_2.ends[3])):
                     group.append(line_1)
                     not_found_group = False
                     break
@@ -143,13 +147,14 @@ class HoughBundler:
         return groups
 
     def merge_line_segments(self, lines):
-        orientation = self.get_orientation(lines[0])
+        orientation = lines[0].orientation
       
         if(len(lines) == 1):
-            return np.block([[lines[0][:2], lines[0][2:]]])
+            return np.block([[lines[0].ends[:2], lines[0].ends[2:]]])
 
         points = []
-        for line in lines:
+        for line_object in lines:
+            line = line_object.ends
             points.append(line[:2])
             points.append(line[2:])
         if 45 < orientation <= 90:
@@ -162,20 +167,26 @@ class HoughBundler:
         return np.block([[points[0],points[-1]]])
 
     def process_lines(self, lines):
+        # print(lines[0])
+        # line_objects = []
+        # for line in lines:
+        #     line_objects.append(Line(line,average_color_on_line(self.lab_img,line)))
+
         lines_horizontal  = []
         lines_vertical  = []
   
         for line_i in [l[0] for l in lines]:
+            # print(line_i)
             orientation = self.get_orientation(line_i)
-            print(orientation)
+            # print(orientation)
             # if vertical
             if 45 < orientation <= 90:
-                lines_vertical.append(line_i)
+                lines_vertical.append(Line(line_i,average_color_on_line(self.lab_img,line_i),orientation))
             else:
-                lines_horizontal.append(line_i)
+                lines_horizontal.append(Line(line_i,average_color_on_line(self.lab_img,line_i),orientation))
 
-        lines_vertical  = sorted(lines_vertical , key=lambda line: line[1])
-        lines_horizontal  = sorted(lines_horizontal , key=lambda line: line[0])
+        lines_vertical  = sorted(lines_vertical , key=lambda line: line.ends[1])
+        lines_horizontal  = sorted(lines_horizontal , key=lambda line: line.ends[0])
         merged_lines_all = []
 
         # for each cluster in vertical and horizantal lines leave only one line
@@ -310,29 +321,36 @@ def get_orientation(line):
 def get_connected_lines(lines,lab_img):
     final_lines = []
 
-    #only considering nearby lines for each line
+    line_objects = []
     for line in lines:
-        (x1, y1, x2, y2)  = line
+        orientation = get_orientation(line)
+        color = average_color_on_line(lab_img,line)
+        line_objects.append(Line(line,color,orientation))
+
+    #only considering nearby lines for each line
+
+    for line_object in line_objects:
+        (x1, y1, x2, y2)  = line_object.ends
         p1, p2 = (x1, y1), (x2, y2)
         neighbours = []
-        line_color = get_line_color(line,lab_img)
+        line_color = line_object.color
         max_connection_dist =  min(math.dist(p1,p2) * LINE_EXTENSION_PERCENTAGE,LINE_EXTENSION_LIMIT)
-        line_orientation = get_orientation(line)
-        for nei in lines:
-            if line != nei:
-                (x1, y1, x2, y2)  = nei
+        line_orientation = line_object.orientation
+        for nei_object in line_objects:
+            if line_object != nei_object:
+                (x1, y1, x2, y2)  = nei_object.ends
                 p3, p4 = (x1, y1), (x2, y2)
                 dist = dist_between_lines(p1,p2,p3,p4)
-                nei_color = get_line_color(nei,lab_img)
-                nei_orientation = get_orientation(nei)
+                nei_color = nei_object.color
+                nei_orientation = nei_object.orientation
 
                 large_angle = max(line_orientation,nei_orientation)
                 small_angle = min(line_orientation,nei_orientation)
                 orientation_diff = min(abs(line_orientation - nei_orientation), (180-large_angle)+small_angle)
                 
-                if dist < max_connection_dist and orientation_diff>MIN_ORIENTATION_DIFF:
+                if dist < max_connection_dist and orientation_diff>MIN_ORIENTATION_DIFF:  #and abs(math.dist(line_color,nei_color )) < MAX_LAB_COLOR_DIST:
                 # if (dist < max_connection_dist or get_intersection(p1,p2,p3,p4) is not None) and orientation_diff>MIN_ORIENTATION_DIFF:        #and math.dist(line_color,nei_color)<MAX_LAB_COLOR_DIST:
-                    neighbours.append(nei)
+                    neighbours.append(nei_object.ends)
 
         
         for combo in itertools.combinations(neighbours, 2):
@@ -511,7 +529,8 @@ def find_white_lines_and_largest_contour(white_mask,original,maxGap=3,minHoughLi
 
     lines = bundler.process_lines(lines)
     lines = bundler.process_lines(lines)
-    
+
+    # lines = bundler.process_lines(lines)
 
    
     print(f"bundled LINE COUNT:{len(lines)}")
@@ -674,12 +693,13 @@ def find_table(img, display=False,showresult=False):
 
 if __name__ == '__main__':
     
-    #balanced.png doesn't work, table lines up with another line
+    #balanced.png doesn't work, table lines up with another line ok now
+    #blue.png.., hall.jpg
 
 
     profiler = cProfile.Profile()
-    # img = cv2.imread("images/hall17.jpg")
-    img = cv2.imread("images/tabletest1.png")
+    # img = cv2.imread("images/hall18.jpg")
+    img = cv2.imread("images/tabletest2.png")
     profiler.enable()
     find_table(img,display=True,showresult=True)
     #asd.find_table(img,display=True)
