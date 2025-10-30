@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 import shapely
 
-import find_table
+# import find_table
 import fast_find_table
 import stats
 
@@ -229,13 +229,13 @@ def point_side(a, b, p):
     #put coliniear case to the left side, just to make this easier
     val = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
     if val >= 0:
-        return "left"
+        return "Left"
     else:
-        return "right"
+        return "Right"
     
     
 
-def create_point(point_id, set_number, server, receiver, winner, start, end, bounces):
+def create_point(point_id, set_number, server, receiver, winner, start, end, bounces,serve_bounce):
     return {
         "point_id": point_id,
         "set_number": set_number,
@@ -246,15 +246,17 @@ def create_point(point_id, set_number, server, receiver, winner, start, end, bou
         "point_won_on_serve": winner == server,
         "frame_start": start,
         "frame_end": end,
-        "bounces": bounces
+        "bounces": bounces,
+        "serve_bounce":serve_bounce,
+        "winning_bounce":bounces[-1]
     }
 
 def transformed_bounce_side(pos):
     table_midpoint = 445
     if pos[1]<table_midpoint: 
-        return "left"
+        return "Left"
     else:
-        return "right"
+        return "Right"
 
 def is_point_over(frames_since_ball, last_bounce_frame, curr_frame, real_fps,analysis_fps, bounces,ball_history):
     #if ball tracking gets very robust, maybe track the ball in the whole image, not just over the table and look at bounces on the floor?
@@ -351,13 +353,13 @@ def is_possible_distortion(ball_radius, contour):
 
 def get_new_predicted_positions(curr_frame,ball_history,server,left_serve_pos,right_serve_pos,table_length,skip_rate):
     if len(ball_history)==0:
-        if server=="left":
+        if server=="Left":
             return [left_serve_pos]
         else:
             return [right_serve_pos]
     
     elif len(ball_history)==1:
-        if server=="left":
+        if server=="Left":
             predicted_velocity = (0.05*table_length,0)
         else:
             predicted_velocity = (-0.05*table_length,0)
@@ -534,16 +536,16 @@ def get_possible_x_range(ball_history,server, midpoint1,midpoint2,table_left_end
     
     
     if len(ball_history)==1: #or 1?
-        if server=="left":
+        if server=="Left":
             return [prev_pos[0],DOWNSAMPLE_COLS]
         else:
             return [0,prev_pos[0]]
     else:
         velocity = tuple(np.subtract(ball_history[-1].position, ball_history[-2].position))
         # print(f"velocity:{velocity}")
-        if side=="left" and velocity[0]>0:
+        if side=="Left" and velocity[0]>0:
             return [prev_pos[0],DOWNSAMPLE_COLS]
-        elif side=="right" and velocity[0]<0:
+        elif side=="Right" and velocity[0]<0:
             return [0,prev_pos[0]]
         
         #this is specific to when only tracking inside table bounds
@@ -574,11 +576,11 @@ def timestamp_to_framecount(filepath,fps):
 
     return frame_counts
 
-def main():
+def main(video_path, stop_event=None, metadata_queue = None, progress_callback = None, display=False, eval = False):
 
     overall_start = time.time()
-    display = True
-    eval = True
+    # display = True
+    # eval = True
     #evaluation stuff
     BALL_POS_PATH = 'openData/game_3/ball_markup.json'
     with open(BALL_POS_PATH) as json_file:
@@ -596,9 +598,11 @@ def main():
 
     # capture = cv2.VideoCapture("myvideos/test60fps.mp4") 
     # capture = cv2.VideoCapture("myvideos/random.mkv")
-    capture = cv2.VideoCapture("openData/game_2.mp4")
+    # capture = cv2.VideoCapture("openData/game_2.mp4")
     # capture = cv2.VideoCapture("openData/serve2.mp4")
     # capture = cv2.VideoCapture("myvideos/wtt2.webm")
+
+    capture = cv2.VideoCapture(video_path)
     output = cv2.imread('images/output_table_flipped.jpg')
 
     
@@ -785,9 +789,16 @@ def main():
     serve_candidates = []
     serve_like_events = []
     possible_x_range = [0,DOWNSAMPLE_COLS]
-    
+    serve_bounce = None
 
     while True:
+        if stop_event is not None and stop_event.is_set():
+            print("Task cancelled!")
+            return None
+
+        if frame_count % (fps*5) and progress_callback is not None:
+            progress_callback(frame_count, nr_frames)
+        
         frame_count += 1
        
         #time1 = time.time()
@@ -987,6 +998,13 @@ def main():
                     cv2.circle(frame, bounce_pos, radius=2, color=(0, 255, 0), thickness=-1)
                     transformed_pos = cv2.perspectiveTransform(np.float32([bounce_pos]).reshape(-1,1,2),M)
                     bounces_this_point.append(((int(transformed_pos[0][0][0]),int(transformed_pos[0][0][1])), frame_count))
+                    
+                    bounce_side = point_side(midpoint2,midpoint1, bounce_pos)
+                    if serve_bounce is None and bounce_side != server:
+                        serve_bounce = bounces_this_point[-1][0]
+                        print(f"serve bounce:{serve_bounce}")
+                        
+
                     print(transformed_pos)
                     print(transformed_pos[0][0])
                     if display:
@@ -1019,14 +1037,14 @@ def main():
                 point_started = False
                 if len(bounces_this_point)>0:
                     if bounces_this_point[-1][0][1]<table_midpoint: #bounced on the left side for the last time
-                        winner = "right"
+                        winner = "Right"
                     else:
-                        winner = "left"
+                        winner = "Left"
 
                     print("proper point, added to stats")
 
                     just_bounce_positions = [x[0] for x in bounces_this_point]
-                    points_metadata.append(create_point(1,1,server,receiver,winner,point_start_frame,frame_count,just_bounce_positions))
+                    points_metadata.append(create_point(1,1,server,receiver,winner,point_start_frame,frame_count,just_bounce_positions,serve_bounce))
                     print(points_metadata[-1])
                     bounces.append(bounces_this_point.copy())
                 
@@ -1046,6 +1064,7 @@ def main():
                     serve_fp +=1
                         
 
+                serve_bounce = None
                 ball_contour = cnt_on_table
                 ball_color = get_cnt_color2(ball_contour,hsv)
                 ball_pos = get_cnt_centroid(cnt_on_table)
@@ -1058,12 +1077,12 @@ def main():
                 #serve_like_events.clear()
 
                 
-                if point_side(midpoint2,midpoint1, toss_pos)=="left":
-                    server = "left"
-                    receiver = "right"
+                if point_side(midpoint2,midpoint1, toss_pos)=="Left":
+                    server = "Left"
+                    receiver = "Right"
                 else:
-                    server = "right"
-                    receiver = "left"
+                    server = "Right"
+                    receiver = "Left"
                 
 
                 possible_x_range = get_possible_x_range(ball_history,server,midpoint1,midpoint2,table_left_end,table_right_end)
@@ -1148,8 +1167,8 @@ def main():
 
 
 
-    print(points_metadata)
-    stats.get_stats(points_metadata)
+    # print(points_metadata)
+    # stats.get_stats(points_metadata)
 
     if eval:
         precision = tp/(tp+fp)
@@ -1167,13 +1186,21 @@ def main():
     overall_end = time.time()
     print(f"processing time:{overall_end-overall_start}")
     # stats.calculate(midpoint1,midpoint2,bounces)
+    
+    if metadata_queue is not None:
+        # print(points_metadata)
+        metadata_queue.put(points_metadata)
+        if progress_callback is not None:
+            progress_callback(frame_count,nr_frames)
+
+    return points_metadata
 
 if __name__ == '__main__':
     # cProfile.run('main()', sort='cumtime')
-
+    path = "openData/serve2.mp4"
     profiler = cProfile.Profile()
     profiler.enable()
-    main()
+    main(path,display=True)
     profiler.disable()
     stats = pstats.Stats(profiler).sort_stats('cumtime')
     stats.print_stats(30)

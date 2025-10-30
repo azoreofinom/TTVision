@@ -698,8 +698,8 @@ if __name__ == '__main__':
 
 
     profiler = cProfile.Profile()
-    # img = cv2.imread("images/hall18.jpg")
-    img = cv2.imread("images/tabletest2.png")
+    img = cv2.imread("images/hall16.jpg")
+    # img = cv2.imread("images/tabletest2.png")
     profiler.enable()
     find_table(img,display=True,showresult=True)
     #asd.find_table(img,display=True)
