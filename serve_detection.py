@@ -1197,10 +1197,10 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
 
 if __name__ == '__main__':
     # cProfile.run('main()', sort='cumtime')
-    path = "openData/serve2.mp4"
+    path = "openData/game_3.mp4"
     profiler = cProfile.Profile()
     profiler.enable()
-    main(path,display=True)
+    main(path,display=False)
     profiler.disable()
     stats = pstats.Stats(profiler).sort_stats('cumtime')
     stats.print_stats(30)
