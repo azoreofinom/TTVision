@@ -328,7 +328,11 @@ def get_roi_bounds(ball_pos, table_left_end, table_right_end, table_bottom):
     return roi_topleft, roi_botright
 
 def is_bounce(ball_history, table_quad,skip_rate):
-    if len(ball_history)<3 or not table_quad.contains(shapely.Point(ball_history[-2].position)):
+    bounce_pos = get_cnt_bottom(ball_history[-2].contour)
+    if len(ball_history)<3 or not table_quad.contains(shapely.Point(bounce_pos)):
+        if not table_quad.contains(shapely.Point(bounce_pos)):
+            print("bounce outside table")
+
         return False
     
     t1 = ball_history[-1].frame-ball_history[-2].frame
@@ -576,6 +580,9 @@ def timestamp_to_framecount(filepath,fps):
 
     return frame_counts
 
+
+
+
 def main(video_path, stop_event=None, metadata_queue = None, progress_callback = None, display=False, eval = False):
 
     overall_start = time.time()
@@ -686,7 +693,7 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
 
     strict_table_quad = table_quad.buffer(0, join_style="mitre")
     #this should help include bounces which are right on the boundary of the table
-    table_quad = table_quad.buffer(2, join_style="mitre")
+    table_quad = table_quad.buffer(5, join_style="mitre")
 
     
     if table_quad:
@@ -902,9 +909,9 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
 
         if not point_started:
             ball_candidates, contours_inside_table = get_ball_candidates(combined, strict_table_quad, fgMask, serve_like_events, table_bottom)
-            serve_candidates = update_serve_candidates(serve_candidates,ball_candidates,frame_count,table_quad,serve_like_events,hsv, inner_left,inner_right,table_bottom,fps)
+            serve_candidates = update_serve_candidates(serve_candidates,ball_candidates,frame_count,strict_table_quad,serve_like_events,hsv, inner_left,inner_right,table_bottom,fps)
         else:
-            ball_contour = get_ball_during_point(combined, hsv,ball_history, table_left_end, table_right_end,roi_topleft,roi_botright,last_high_conf_area, predicted_positions,possible_x_range)
+            ball_contour = get_ball_during_point(combined, hsv,ball_history, table_left_end, table_right_end,roi_topleft,roi_botright,last_high_conf_area, predicted_positions,possible_x_range)  # noqa: F821
    
         # ball_contour = ball_candidates
 
@@ -984,6 +991,10 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
                 ball_color = get_cnt_color2(ball_contour,hsv)
 
                 ball_history.append(BallCandidate(radius,circularity,ball_pos, frame_count,ball_contour,ball_color))
+
+                velocity = tuple(np.subtract(ball_history[-1].position, ball_history[-2].position))
+
+
                 if len(ball_history)>history:
                     ball_history.popleft()
 
@@ -995,23 +1006,27 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
                     print("BOUNCE")
                     last_bounce_frame = frame_count
                     bounce_pos = get_cnt_bottom(ball_history[-2].contour)
-                    cv2.circle(frame, bounce_pos, radius=2, color=(0, 255, 0), thickness=-1)
-                    transformed_pos = cv2.perspectiveTransform(np.float32([bounce_pos]).reshape(-1,1,2),M)
-                    bounces_this_point.append(((int(transformed_pos[0][0][0]),int(transformed_pos[0][0][1])), frame_count))
-                    
                     bounce_side = point_side(midpoint2,midpoint1, bounce_pos)
+                    if (velocity[0]>0 and bounce_side=="Right") or (velocity[0]<0 and bounce_side=="Left") or len(bounces_this_point)==0:
+                        cv2.circle(frame, bounce_pos, radius=2, color=(0, 255, 0), thickness=-1)
+                        transformed_pos = cv2.perspectiveTransform(np.float32([bounce_pos]).reshape(-1,1,2),M)
+                        bounces_this_point.append(((int(transformed_pos[0][0][0]),int(transformed_pos[0][0][1])), frame_count))
+                        print(transformed_pos)
+                        print(transformed_pos[0][0])
+                        if display:
+                            cv2.circle(output, (int(transformed_pos[0][0][0]),int(transformed_pos[0][0][1])), radius=2, color=(0, 255, 0), thickness=-1)
+                            cv2.imshow("output",output)
+                            cv2.waitKey(0)
+                            cv2.destroyAllWindows()
+                    else:
+                        print("BOUNCE IS NOT LEGAL!")
+                    
                     if serve_bounce is None and bounce_side != server:
                         serve_bounce = bounces_this_point[-1][0]
                         print(f"serve bounce:{serve_bounce}")
                         
 
-                    print(transformed_pos)
-                    print(transformed_pos[0][0])
-                    if display:
-                        cv2.circle(output, (int(transformed_pos[0][0][0]),int(transformed_pos[0][0][1])), radius=2, color=(0, 255, 0), thickness=-1)
-                        cv2.imshow("output",output)
-                        cv2.waitKey(0)
-                        cv2.destroyAllWindows()
+                    
 
 
 
@@ -1197,10 +1212,10 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
 
 if __name__ == '__main__':
     # cProfile.run('main()', sort='cumtime')
-    path = "openData/game_3.mp4"
+    path = "openData/serve2.mp4"
     profiler = cProfile.Profile()
     profiler.enable()
-    main(path,display=False)
+    main(path,display=True)
     profiler.disable()
     stats = pstats.Stats(profiler).sort_stats('cumtime')
     stats.print_stats(30)
