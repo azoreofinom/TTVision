@@ -49,7 +49,7 @@ MAX_DIST_FROM_PREVIOUS_POS  = DOWNSAMPLE_COLS // 20
 TRACKING_WINDOW_HEIGHT = DOWNSAMPLE_ROWS // 4
 TRACKING_WINDOW_WIDTH = DOWNSAMPLE_COLS // 4
 MAX_TRACKING_DIST = math.sqrt(TRACKING_WINDOW_HEIGHT**2 + TRACKING_WINDOW_WIDTH**2)
-MAX_COLOR_DIFF = 100
+MAX_COLOR_DIFF = 80
 
 MAX_AREA_RATIO = 15
 
@@ -146,7 +146,7 @@ def get_ball_during_point(frame_mask,hsv,ball_history,left,right,roi_l,roi_r,bal
             continue
         
         if len(ball_history)>0:
-            if color[2]<0.4*prev_color[2] or  abs(color[1]-prev_color[1])>MAX_COLOR_DIFF:            #or abs(color[1]-prev_color[1])>100: #filtering shadows...this could be much better, I'm sure. saturation seems to change a lot by lighting??
+            if math.dist(color,prev_color)>MAX_COLOR_DIFF:          
                 print(f"excluded due to color:{color}")
                 print(get_cnt_color(cnt,hsv))
                 continue
@@ -441,10 +441,22 @@ def get_white_threshold(frame,mask):
         
         binary_image = (binary_map.astype(np.uint8)) * 255
         binary_image = cv2.bitwise_and(binary_image,mask)
-        return binary_image
+        return binary_image, ve_thresh, se_thresh
     else:
-        return mask
+        return mask, 0, 255
         # cv2.imshow("white mask", binary_image)
+
+def apply_white_filter(frame, mask, ve_thresh, se_thresh):
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+    # binary_map = (v_channel >= ve_thresh) & (s_channel <= se_thresh)
+    binary_map = cv2.inRange(hsv,(0,0,ve_thresh),(179,se_thresh,255))
+    # Convert boolean mask to uint8 (0 or 1)
+    
+    binary_image = (binary_map.astype(np.uint8)) * 255
+    binary_image = cv2.bitwise_and(binary_image,mask)
+
+    return binary_image
 
 
 def update_serve_candidates(serve_candidates, ball_candidates, frame_count,table_quad,serve_events,frame, inner_left, inner_right,table_bottom,fps):
@@ -517,7 +529,7 @@ def point_is_starting(mask, strict_table_quad, serve_like_events, contours_insid
 
 
             if (frame_count - serve_event.frame < 1.1*real_fps  
-                and 0.8<inside_area/serve_area<5 and color[2]>0.4*serve_event.color[2] and abs(color[1]-serve_event.color[1])<MAX_COLOR_DIFF): #and point_side(midpoint2,midpoint1, serve_pos)==inside_side:
+                and 0.8<inside_area/serve_area<5 and math.dist(color,serve_event.color)<MAX_COLOR_DIFF ): #and point_side(midpoint2,midpoint1, serve_pos)==inside_side:
                 print("serve color diff")
                 print(serve_event.color)
                 print(color)
@@ -710,6 +722,9 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
     table_bottom = max(row_values)
     table_length = table_right_end - table_left_end
 
+    #EXTENDING TRACKING REGION: TESTING!
+    table_left_end -= 100
+    table_right_end += 100
 
     col_values = sorted(set(col_values))
     inner_left = col_values[1]
@@ -798,6 +813,9 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
     possible_x_range = [0,DOWNSAMPLE_COLS]
     serve_bounce = None
 
+    # min_value = 0
+    # max_saturation = 255  
+
     while True:
         if stop_event is not None and stop_event.is_set():
             print("Task cancelled!")
@@ -809,8 +827,12 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
         frame_count += 1
        
         #time1 = time.time()
+       
+        if frame_count % skip_rate != 0:
+            ret = capture.grab()
+            continue
+
         ret, frame = capture.read()
-        
         
         #time2  =time.time()
 
@@ -850,15 +872,14 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
         
 
 
-        if frame_count % skip_rate != 0:
-            continue
+        
 
         
         
 
         start_time = time.time()
         frame = cv2.resize(frame,(DOWNSAMPLE_COLS,DOWNSAMPLE_ROWS),interpolation=cv2.INTER_AREA)
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
 
         # frame = frame[0:original_rows, 0:int(original_cols//2)]
         # frame = frame[0:original_rows, int(original_cols//2):original_cols]
@@ -873,22 +894,22 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
         _,fgMask = cv2.threshold(fgMask, 130, 255, cv2.THRESH_BINARY)
 
         
-        
-        # cv2.imshow("before",fgMask)
-        # fgMask = cv2.medianBlur(fgMask, 5)
-        # cv2.imshow("after",fgMask)
-        if point_started:
-            fgMask = cv2.medianBlur(fgMask, 5)
-            fgMask = remove_large_blobs(fgMask,max_area=last_high_conf_area*15)
             
 
-            combined = fgMask
-        else:
-            combined = get_white_threshold(frame,fgMask) 
+        if point_started:
+            fgMask = cv2.medianBlur(fgMask, 5)
+            # fgMask = remove_large_blobs(fgMask,max_area=last_high_conf_area*15)
             
-            if len(serve_like_events)>0:
-                fgMask = cv2.medianBlur(fgMask, 5)
-                fgMask = remove_large_blobs(fgMask,max_area=last_high_conf_area*15)
+        
+            combined = fgMask
+            # combined = apply_white_filter(frame, fgMask,min_value,max_saturation)
+
+        else:
+            combined, min_value, max_saturation = get_white_threshold(frame,fgMask) 
+            
+            # if len(serve_like_events)>0:
+            #     fgMask = cv2.medianBlur(fgMask, 5)
+            #     fgMask = remove_large_blobs(fgMask,max_area=last_high_conf_area*15)
         
        
       
@@ -1110,6 +1131,7 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
                 last_high_conf_area = toss_area
                 print(f"HIGH CONF AREA: {toss_area}")
                 roi_topleft, roi_botright = get_roi_bounds(ball_pos, table_left_end, table_right_end, table_bottom)
+                
                 # cv2.drawContours(frame, ball_contour, -1, (0, 0, 255), 1)
                 # cv2.namedWindow("Frame difference", cv2.WINDOW_NORMAL)
                 # cv2.resizeWindow("Frame difference", 800, 600)
@@ -1212,10 +1234,15 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
 
 if __name__ == '__main__':
     # cProfile.run('main()', sort='cumtime')
-    path = "openData/serve2.mp4"
+    path = "openData/game_3.mp4"
     profiler = cProfile.Profile()
     profiler.enable()
-    main(path,display=False)
+    asd1 = time.time()
+    meta = main(path,display=False,eval=False)
+    asd2 = time.time()
+    print(asd2-asd1)
     profiler.disable()
     stats = pstats.Stats(profiler).sort_stats('cumtime')
     stats.print_stats(30)
+
+    print(meta)

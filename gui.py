@@ -4,6 +4,7 @@ import sv_ttk
 from PIL import Image, ImageTk,ImageDraw
 import os
 import serve_detection
+import serve_detection_lab
 import threading
 import queue
 import stats
@@ -206,7 +207,7 @@ class StatsGUI:
         print("Analyzing video...")  # replace with your actual logic
         if self.video_path:
             self.stop_event = threading.Event()
-            self.worker_thread = threading.Thread(target=serve_detection.main,args=(self.video_path,self.stop_event,self.metadata_queue,self.progress_callback),daemon=True)
+            self.worker_thread = threading.Thread(target=serve_detection_lab.main,args=(self.video_path,self.stop_event,self.metadata_queue,self.progress_callback),daemon=True)
             self.worker_thread.start()
             self.analyze_btn.config(state='disabled')
             self.cancel_btn.config(state='normal')
