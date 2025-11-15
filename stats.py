@@ -49,6 +49,9 @@ def bucket_rally(length):
 
 
 def bucket_serves(serve_pos):
+    if serve_pos is None:
+        return "Weird"
+    
     if serve_pos[1] < 156 or serve_pos[1] > 733:
         return "Long"
     elif serve_pos[1] < 252 or serve_pos[1] > 637:
