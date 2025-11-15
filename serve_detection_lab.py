@@ -118,8 +118,14 @@ def get_ball_during_point(frame_mask,hsv,ball_history,left,right,roi_l,roi_r,tos
 
     roi_topleft = roi_l
     roi_botright = roi_r
-    roi = frame_mask[roi_topleft[1]:roi_botright[1], roi_topleft[0]:roi_botright[0]]
-    roi_contours, _ = cv2.findContours(roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE, offset=roi_topleft)
+
+    # roi = frame_mask[roi_topleft[1]:roi_botright[1], roi_topleft[0]:roi_botright[0]]
+    # roi_contours, _ = cv2.findContours(roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE, offset=roi_topleft)
+
+    #TRYING THIS. GETTING CONTOURS ONLY FROM ROI GIVES CUT-OFF BLOBS FROM ARMS ETC
+    roi = frame_mask
+    roi_contours, _ = cv2.findContours(roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    
     contours = roi_contours
     best_contour = None
     shortest_dist = float('inf')
@@ -249,12 +255,17 @@ def get_cnt_color2(cnt,frame):
     dirs = [[0,-1],[0,1],[-1,0],[1,0],[0,0]]
 
     center = get_cnt_centroid(cnt)
-    mean = [0,0,0]
+    pixel_values = []
     for dir in dirs:
-        mean = np.add(mean, frame[center[1]+dir[1]][center[0]+dir[0]])
+        pos_x = center[0]+dir[0]
+        pos_y = center[1]+dir[1]
+        if 0<=pos_x<DOWNSAMPLE_COLS and 0<=pos_y<DOWNSAMPLE_ROWS:
+            pixel_values.append(frame[pos_y][pos_x])
 
-    result = [int(x/5) for x in mean]
-    return result
+
+    arr = np.array(pixel_values)
+    means = np.mean(arr, axis=0)
+    return tuple(means.astype(int))
 
 def get_cnt_median_color(cnt,frame):
     dirs = [[0,-1],[0,1],[-1,0],[1,0],[0,0]]
@@ -900,11 +911,11 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
         #     continue
 
         # game 1, complete set
-        # if frame_count<nr_frames*0.08:
-        #     continue
+        if frame_count<nr_frames*0.08:
+            continue
         
-        # if frame_count>nr_frames*0.57:
-        #     break
+        if frame_count>nr_frames*0.57:
+            break
 
 
         #game 3, first set
@@ -1264,7 +1275,7 @@ if __name__ == '__main__':
     profiler = cProfile.Profile()
     profiler.enable()
     asd1 = time.time()
-    meta = main(path,display=True,eval=True)
+    meta = main(path,display=False,eval=True)
     asd2 = time.time()
     print(asd2-asd1)
     profiler.disable()
