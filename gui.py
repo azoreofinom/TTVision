@@ -15,7 +15,7 @@ class StatsGUI:
         self.video_path = None
         self.root = root
         self.root.title("Match Statistics Viewer")
-        self.root.geometry("1200x1000")
+        self.root.geometry("1200x800")
 
         self.stop_event = None
         self.worker_thread = None
@@ -265,12 +265,10 @@ if __name__ == "__main__":
     root = tk.Tk()
     sv_ttk.set_theme("dark")
 
-    app = StatsGUI(root, default_image_path="images/output_table_flipped.jpg")  # Replace with your default image path
+    # app = StatsGUI(root, default_image_path="images/output_table_flipped.jpg")  
 
-    # # Example dynamic stats update after 2 seconds
-    # root.after(2000, lambda: app.update_stats(
-    #     {"Points Won": 42, "Points on Serve": 30, "Avg Rally Length (Win)": 5.7},
-    #     {"Points Won": 38, "Points on Serve": 28, "Avg Rally Length (Win)": 4.9}
-    # ))
+    app = StatsGUI(root, default_image_path="images/output_table_horizontal.png")  
+
+    
 
     root.mainloop()

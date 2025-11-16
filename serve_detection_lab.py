@@ -313,6 +313,13 @@ def transformed_bounce_side(pos):
         return "Left"
     else:
         return "Right"
+    
+def horizontal_transformed_bounce_side(pos):
+    table_midpoint = 385
+    if pos[0]<table_midpoint: 
+        return "Left"
+    else:
+        return "Right"
 
 def is_point_over(frames_since_ball, last_bounce_frame, curr_frame, real_fps,analysis_fps, bounces,ball_history):
     #if ball tracking gets very robust, maybe track the ball in the whole image, not just over the table and look at bounces on the floor?
@@ -397,6 +404,11 @@ def is_bounce(ball_history, table_quad,skip_rate):
     vel3 = tuple(np.subtract(ball_history[-1].position, ball_history[-2].position))
    
     if t1==t2==skip_rate and vel2[1]>0 and vel3[1]<0:
+        return True
+    
+    #TESTING
+    if t1==t2==skip_rate and vel2[1]>0 and vel3[1]<(vel2[1]-1):
+        print("BOUNCE FOUND USING NEW CONDITION")
         return True
     
     if len(ball_history)>3:
@@ -656,8 +668,7 @@ def timestamp_to_framecount(filepath,fps):
 def main(video_path, stop_event=None, metadata_queue = None, progress_callback = None, display=False, eval = False):
 
     overall_start = time.time()
-    # display = True
-    # eval = True
+    
     #evaluation stuff
     BALL_POS_PATH = 'openData/game_1/ball_markup.json'
     with open(BALL_POS_PATH) as json_file:
@@ -673,15 +684,13 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
     serve_tp = 0
     serve_fp = 0
 
-    # capture = cv2.VideoCapture("myvideos/test60fps.mp4") 
-    # capture = cv2.VideoCapture("myvideos/random.mkv")
-    # capture = cv2.VideoCapture("openData/game_2.mp4")
-    # capture = cv2.VideoCapture("openData/serve2.mp4")
-    # capture = cv2.VideoCapture("myvideos/wtt2.webm")
+   
 
     capture = cv2.VideoCapture(video_path)
-    output = cv2.imread('images/output_table_flipped.jpg')
 
+    # output = cv2.imread('images/output_table_flipped.jpg')
+
+    output = cv2.imread('images/output_table_horizontal.png')
     
     fps = capture.get(cv2.CAP_PROP_FPS)
     backSub = cv2.createBackgroundSubtractorMOG2(varThreshold=12, detectShadows=True, history=int(fps)*20)
@@ -691,7 +700,7 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
     print(backSub.getBackgroundRatio())
     print(backSub.getHistory())
     #backSub.setShadowThreshold(0.25)
-    # time.sleep(10)
+    
     nr_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
     
     # if fps>=60:
@@ -808,7 +817,12 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
 
     #points for transforming points from side angle to top angle
     src_pts = []
-    dst_pts = [(32,60),(32,828),(466,60),(466,828)]
+
+    #vertical points
+    # dst_pts = [(32,60),(32,828),(466,60),(466,828)]
+
+    #horizontal points
+    dst_pts = [(0,433),(769,433),(0,0),(769,0)]
 
     larg = heapq.heappop(table_edges)
 
@@ -822,7 +836,8 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
     src_pts.append((larg[2][0],larg[2][1]))
     midpoint2 = ((larg[1][0]+larg[2][0])//2, (larg[1][1]+larg[2][1])//2)
   
-    
+
+    # prev_frame = cv2.resize(prev_frame,(DOWNSAMPLE_COLS,DOWNSAMPLE_ROWS),interpolation=cv2.INTER_AREA)
     # cv2.line(prev_frame, midpoint1, midpoint2, (0,0,255), 1)
     # cv2.imshow("?", prev_frame)
     # cv2.waitKey(0)
@@ -834,8 +849,14 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
     M, mask = cv2.findHomography(src_pts, dst_pts,0)
     reverse_M = np.linalg.inv(M)
 
-    left_serve_spot = (250,200)
-    right_serve_spot = (250,690)
+    #VERTICAL
+    # left_serve_spot = (250,200)
+    # right_serve_spot = (250,690)
+
+    #HORIZONTAL
+    left_serve_spot = (100,216)
+    right_serve_spot = (669,216)
+
     transformed_left = cv2.perspectiveTransform(np.float32([left_serve_spot]).reshape(-1,1,2),reverse_M)[0][0]
     transformed_left = (int(transformed_left[0]),int(transformed_left[1]))
     transformed_right = cv2.perspectiveTransform(np.float32([right_serve_spot]).reshape(-1,1,2),reverse_M)[0][0]
@@ -858,6 +879,8 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
     prev_frame = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
 
     table_midpoint = 445
+    horizontal_table_midpoint = 385
+
     bounces_this_point = []
     bounces = []
     points_metadata = []
@@ -911,11 +934,11 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
         #     continue
 
         # game 1, complete set
-        if frame_count<nr_frames*0.08:
-            continue
+        # if frame_count<nr_frames*0.08:
+        #     continue
         
-        if frame_count>nr_frames*0.57:
-            break
+        # if frame_count>nr_frames*0.57:
+        #     break
 
 
         #game 3, first set
@@ -950,7 +973,10 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
         #blur = cv2.GaussianBlur(frame, (7, 7), 1.5)
 
         blur = frame
+        #NOT SURE ABOUT THIS
         fgMask = backSub.apply(blur, learningRate =0.0005)
+        # fgMask = backSub.apply(blur)
+
         _,fgMask = cv2.threshold(fgMask, 130, 255, cv2.THRESH_BINARY)
 
         
@@ -1111,7 +1137,7 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
                 print("point over")
                 point_started = False
                 if len(bounces_this_point)>0:
-                    if bounces_this_point[-1][0][1]<table_midpoint: #bounced on the left side for the last time
+                    if bounces_this_point[-1][0][0]<horizontal_table_midpoint: #bounced on the left side for the last time
                         winner = "Right"
                     else:
                         winner = "Left"
@@ -1275,7 +1301,7 @@ if __name__ == '__main__':
     profiler = cProfile.Profile()
     profiler.enable()
     asd1 = time.time()
-    meta = main(path,display=False,eval=True)
+    meta = main(path,display=True,eval=True)
     asd2 = time.time()
     print(asd2-asd1)
     profiler.disable()
