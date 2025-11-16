@@ -177,7 +177,7 @@ class StatsGUI:
             image_copy = self.pil_image.copy()
             draw = ImageDraw.Draw(image_copy)
             for bounce in bounces:
-                draw.circle(bounce,2)
+                draw.circle(bounce,radius=2,fill=(255,0,0))
             
             self.tk_image = ImageTk.PhotoImage(image_copy)
             self.image_label.config(image=self.tk_image, text="")

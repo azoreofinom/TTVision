@@ -663,6 +663,13 @@ def timestamp_to_framecount(filepath,fps):
     return frame_counts
 
 
+def process_bounce_pos(bounce_pos):
+    cols = 770
+    rows = 434
+
+    x = max(0, min(bounce_pos[0][0][0], cols-1))
+    y = max(0, min(bounce_pos[0][0][1], rows-1))
+    return (int(x),int(y))
 
 
 def main(video_path, stop_event=None, metadata_queue = None, progress_callback = None, display=False, eval = False):
@@ -1109,11 +1116,19 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
                     if (velocity[0]>0 and bounce_side=="Right") or (velocity[0]<0 and bounce_side=="Left") or len(bounces_this_point)==0:
                         cv2.circle(frame, bounce_pos, radius=2, color=(0, 255, 0), thickness=-1)
                         transformed_pos = cv2.perspectiveTransform(np.float32([bounce_pos]).reshape(-1,1,2),M)
-                        bounces_this_point.append(((int(transformed_pos[0][0][0]),int(transformed_pos[0][0][1])), frame_count))
+                        processed_pos = process_bounce_pos(transformed_pos)
+
+                        # bounces_this_point.append(((int(transformed_pos[0][0][0]),int(transformed_pos[0][0][1])), frame_count))
+                        bounces_this_point.append((processed_pos,frame_count))
+
+                        print(processed_pos)
                         print(transformed_pos)
                         print(transformed_pos[0][0])
+
                         if display:
-                            cv2.circle(output, (int(transformed_pos[0][0][0]),int(transformed_pos[0][0][1])), radius=2, color=(0, 255, 0), thickness=-1)
+                            # cv2.circle(output, (int(transformed_pos[0][0][0]),int(transformed_pos[0][0][1])), radius=2, color=(0, 255, 0), thickness=-1)
+                            cv2.circle(output, processed_pos, radius=2, color=(0, 255, 0), thickness=-1)
+
                             cv2.imshow("output",output)
                             cv2.waitKey(0)
                             cv2.destroyAllWindows()
