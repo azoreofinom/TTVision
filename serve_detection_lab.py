@@ -675,31 +675,30 @@ def process_bounce_pos(bounce_pos):
 def main(video_path, stop_event=None, metadata_queue = None, progress_callback = None, display=False, eval = False):
 
     overall_start = time.time()
-    
-    #evaluation stuff
-    BALL_POS_PATH = 'openData/game_1/ball_markup.json'
-    with open(BALL_POS_PATH) as json_file:
-        data = json.load(json_file)
-
-
-    dict_iter = iter(data.items())
-    eval_frame, ball_x, ball_y = get_next_data(dict_iter)
-    tp = 0
-    fp = 0
-    tn = 0
-    fn = 0
-    serve_tp = 0
-    serve_fp = 0
-
-   
-
     capture = cv2.VideoCapture(video_path)
 
     # output = cv2.imread('images/output_table_flipped.jpg')
 
     output = cv2.imread('images/output_table_horizontal.png')
-    
     fps = capture.get(cv2.CAP_PROP_FPS)
+
+    #evaluation stuff
+    if eval:
+        BALL_POS_PATH = 'openData/game_3/ball_markup.json'
+        with open(BALL_POS_PATH) as json_file:
+            data = json.load(json_file)
+
+
+        dict_iter = iter(data.items())
+        eval_frame, ball_x, ball_y = get_next_data(dict_iter)
+        tp = 0
+        fp = 0
+        tn = 0
+        fn = 0
+        serve_tp = 0
+        serve_fp = 0
+        serve_timestamps = timestamp_to_framecount("openData/game_3/serves.txt", fps)
+
     backSub = cv2.createBackgroundSubtractorMOG2(varThreshold=12, detectShadows=True, history=int(fps)*20)
     print(backSub.getNMixtures())
     print(backSub.getShadowThreshold())
@@ -725,7 +724,7 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
     print(skip_rate)
 
     
-    serve_timestamps = timestamp_to_framecount("openData/game_1/serves.txt", fps)
+    
 
 
     ball_history = collections.deque()
@@ -799,8 +798,13 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
     table_length = table_right_end - table_left_end
 
     #EXTENDING TRACKING REGION: TESTING!
-    table_left_end -= 100
-    table_right_end += 100
+    # table_left_end -= 100
+    # table_right_end += 100
+
+    #WHOLE IMAGE TRACKING
+    table_left_end = 0
+    table_right_end = DOWNSAMPLE_COLS
+
 
     col_values = sorted(set(col_values))
     inner_left = col_values[1]
@@ -905,6 +909,13 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
 
     min_value ,max_saturation = None,None
 
+    #i think i have to rename the resized version, to avoid issues? also prev_frame is gray now
+    #frame = np.zeros_like(prev_frame)
+    
+    full_res_frame = np.zeros(shape=(original_rows,original_cols,3),dtype=np.uint8)
+    fgMask = np.zeros(shape=(DOWNSAMPLE_ROWS,DOWNSAMPLE_COLS),dtype=np.uint8)
+    hsv = np.zeros(shape=(DOWNSAMPLE_ROWS,DOWNSAMPLE_COLS,3),dtype=np.uint8)
+
     while True:
         if stop_event is not None and stop_event.is_set():
             print("Task cancelled!")
@@ -920,8 +931,9 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
         if frame_count % skip_rate != 0:
             ret = capture.grab()
             continue
+        
 
-        ret, frame = capture.read()
+        ret, _ = capture.read(full_res_frame)
         
         #time2  =time.time()
 
@@ -930,8 +942,14 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
         #     continue
         
         #print(f"time to read:{time2-time1}s")
-        if frame is None:
+
+        if frame_count == nr_frames:
             break
+        
+        if full_res_frame is None:
+            break
+
+
         
         #game 4, complete set
         # if frame_count<nr_frames*0.43:
@@ -968,8 +986,8 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
         
 
         start_time = time.time()
-        frame = cv2.resize(frame,(DOWNSAMPLE_COLS,DOWNSAMPLE_ROWS),interpolation=cv2.INTER_AREA)
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+        frame = cv2.resize(full_res_frame,(DOWNSAMPLE_COLS,DOWNSAMPLE_ROWS),interpolation=cv2.INTER_AREA)
+        cv2.cvtColor(src=frame, dst=hsv, code=cv2.COLOR_BGR2LAB)
 
         # frame = frame[0:original_rows, 0:int(original_cols//2)]
         # frame = frame[0:original_rows, int(original_cols//2):original_cols]
@@ -981,16 +999,16 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
 
         blur = frame
         #NOT SURE ABOUT THIS
-        fgMask = backSub.apply(blur, learningRate =0.0005)
+        backSub.apply(image=blur, fgmask=fgMask, learningRate =0.0005)
         # fgMask = backSub.apply(blur)
 
-        _,fgMask = cv2.threshold(fgMask, 130, 255, cv2.THRESH_BINARY)
+        cv2.threshold(src=fgMask,dst=fgMask, thresh=130, maxval=255, type=cv2.THRESH_BINARY)
 
         
             
 
         if point_started:
-            fgMask = cv2.medianBlur(fgMask, 5)
+            cv2.medianBlur(src=fgMask, dst=fgMask, ksize=5)
             # fgMask = remove_large_blobs(fgMask,max_area=last_high_conf_area*15)
             
         
@@ -1168,16 +1186,18 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
         else:
             point_starting, toss_ball, cnt_on_table =  point_is_starting(fgMask,strict_table_quad,serve_like_events,contours_inside_table,frame_count,fps,hsv, midpoint1, midpoint2)
             if point_starting:
-                #serve detection evaluation
-                found_timestamp = False
-                for timestamp in serve_timestamps:
-                    if  -fps*2 < (frame_count-timestamp) < fps*2:
-                        serve_tp += 1
-                        found_timestamp = True
-                        break
-                
-                if not found_timestamp:
-                    serve_fp +=1
+
+                if eval:
+                    #serve detection evaluation
+                    found_timestamp = False
+                    for timestamp in serve_timestamps:
+                        if  -fps*2 < (frame_count-timestamp) < fps*2:
+                            serve_tp += 1
+                            found_timestamp = True
+                            break
+                    
+                    if not found_timestamp:
+                        serve_fp +=1
                         
 
                 serve_bounce = None
@@ -1293,13 +1313,12 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
         print(tn)
         print(fp)
         print(fn)
-
-    print("serve detection accuracy:")
-    print(f"tp:{serve_tp}")
-    print(f"fp:{serve_fp}")
-    overall_end = time.time()
-    print(f"processing time:{overall_end-overall_start}")
-    # stats.calculate(midpoint1,midpoint2,bounces)
+        print("serve detection accuracy:")
+        print(f"tp:{serve_tp}")
+        print(f"fp:{serve_fp}")
+        overall_end = time.time()
+        print(f"processing time:{overall_end-overall_start}")
+        # stats.calculate(midpoint1,midpoint2,bounces)
     
     if metadata_queue is not None:
         # print(points_metadata)
@@ -1311,12 +1330,12 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
 
 if __name__ == '__main__':
     # cProfile.run('main()', sort='cumtime')
-    path = "openData/game_1.mp4"
+    path = "openData/game_3.mp4"
     # path = "myvideos/random.mkv"
     profiler = cProfile.Profile()
     profiler.enable()
     asd1 = time.time()
-    meta = main(path,display=True,eval=True)
+    meta = main(path,display=False,eval=True)
     asd2 = time.time()
     print(asd2-asd1)
     profiler.disable()

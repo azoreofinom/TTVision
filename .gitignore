@@ -1,3 +1,6 @@
+
+*.mp4
+
 #readme notes(later...)
 /readme(add later).txt
 
@@ -10,6 +13,7 @@ myvideos/
 openData/
 images/
 old/
+distwithissues/
 
 #files to ignore for now
 /CSRT_tracker_on_back_sub.py

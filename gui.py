@@ -3,12 +3,11 @@ from tkinter import ttk, filedialog
 import sv_ttk
 from PIL import Image, ImageTk,ImageDraw
 import os
-import serve_detection
 import serve_detection_lab
 import threading
 import queue
 import stats
-
+import edit_video
 
 class StatsGUI:
     def __init__(self, root, default_image_path="example_image.jpg"):
@@ -55,6 +54,11 @@ class StatsGUI:
         # Analyze button
         self.analyze_btn = ttk.Button(btn_frame, text="Analyze", command=self.analyze_video)
         self.analyze_btn.pack(side=tk.LEFT, padx=5)
+
+        # Edit button
+        self.edit_btn = ttk.Button(btn_frame, text="Edit", command=self.edit_video)
+        self.edit_btn.pack(side=tk.LEFT, padx=5)
+
 
         # Cancel button
         self.cancel_btn = ttk.Button(btn_frame, text="Cancel", command=self.cancel_analyze)
@@ -184,14 +188,14 @@ class StatsGUI:
        
 
 
-    # ==== Image Handlers ====
+    
     def open_video(self):
         """Open file dialog to select a new video."""
         file_path = filedialog.askopenfilename(
             filetypes=[("Video files", "*.mp4 *.mkv *.webm")]
         )
         self.video_path = file_path
-        print(self.video_path)
+        print(f"path:{self.video_path}")
         # if file_path:
         #     self.load_image(file_path)
 
@@ -209,12 +213,27 @@ class StatsGUI:
             self.stop_event = threading.Event()
             self.worker_thread = threading.Thread(target=serve_detection_lab.main,args=(self.video_path,self.stop_event,self.metadata_queue,self.progress_callback),daemon=True)
             self.worker_thread.start()
+            self.edit_btn.config(state='disabled')
             self.analyze_btn.config(state='disabled')
             self.cancel_btn.config(state='normal')
             self.update_progress(0)
             # serve_detection.main(self.video_path)
         else:
             print("Load a video to analyze")
+
+
+    def edit_video(self):
+        print("Editing video...")  # replace with your actual logic
+        if self.video_path:
+            self.stop_event = threading.Event()
+            self.worker_thread = threading.Thread(target=edit_video.remove_low_overlap_segments,args=(self.video_path,self.stop_event,self.progress_callback),daemon=True)
+            self.worker_thread.start()
+            self.edit_btn.config(state='disabled')
+            self.analyze_btn.config(state='disabled')
+            self.cancel_btn.config(state='normal')
+            self.update_progress(0)
+        else:
+            print("Load a video to edit")
 
 
     def cancel_analyze(self):
@@ -224,10 +243,13 @@ class StatsGUI:
             self.stop_event.set()
         self.cancel_btn.config(state='disabled')
         self.analyze_btn.config(state='normal')
+        self.edit_btn.config(state='normal')
+        self.update_progress(0)
         # self.root.destroy()  # closes the window
 
     def progress_callback(self,step,total):
         percent = int((step / total) * 100)
+        print(f"percent:{percent}")
         self.root.after(0, lambda: self.update_progress(percent))
         # self.root.after(0, lambda: self.update_status(f"Working... {percent}%"))
         if percent >= 100:
@@ -239,7 +261,7 @@ class StatsGUI:
                 self.game_summary = self.stats_object.get_summary_statistics()
 
                 # self.game_summary = stats.get_stats(self.metadata_queue.get())
-                print(self.game_summary)
+                print(f"summary:{self.game_summary}")
 
                 self.root.after(0, lambda: self.update_stats(self.game_summary["Left"],self.game_summary["Right"]))
                 
@@ -266,9 +288,6 @@ if __name__ == "__main__":
     sv_ttk.set_theme("dark")
 
     # app = StatsGUI(root, default_image_path="images/output_table_flipped.jpg")  
-
-    app = StatsGUI(root, default_image_path="images/output_table_horizontal.png")  
-
-    
-
+    basedir = os.path.dirname(__file__)
+    app = StatsGUI(root, default_image_path=os.path.join(basedir, "images/output_table_horizontal.png")) 
     root.mainloop()
