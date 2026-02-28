@@ -5,8 +5,6 @@ import lightning as L
 import segmentation_models_pytorch as smp
 import torch
 
-# import wandb
-
 
 
 class TableSegmenter(L.LightningModule):
@@ -80,23 +78,7 @@ class TableSegmenter(L.LightningModule):
         pred_mask = (prob_mask > self.thres).float()
         return pred_mask
 
-    # def wb_mask(self, img, pred_mask, true_mask):
-    #     # pred_mask = np.zeros((320, 640))
-    #     # pred_mask[50:100, 50:100] = 1
-    #     return wandb.Image(
-    #         img,
-    #         masks={
-    #             "prediction": {
-    #                 "mask_data": pred_mask,
-    #                 "class_labels": {0: "bg", 1: "table"},
-    #             },
-    #             "ground_truth": {
-    #                 "mask_data": true_mask,
-    #                 "class_labels": {0: "bg", 1: "table"},
-    #             },
-    #         },
-    #     )
-
+   
     def tensor2np(self, tensor):
         array = tensor.clone().detach().cpu().permute(1, 2, 0).numpy()
         return array

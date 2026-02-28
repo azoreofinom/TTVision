@@ -13,7 +13,7 @@ class StatsGUI:
     def __init__(self, root, default_image_path="example_image.jpg"):
         self.video_path = None
         self.root = root
-        self.root.title("Match Statistics Viewer")
+        self.root.title("TTApp")
         self.root.geometry("1200x800")
 
         self.stop_event = None
@@ -37,11 +37,7 @@ class StatsGUI:
 
         self.progress = ttk.Progressbar(left_frame, length=300, mode='determinate', maximum=100)
         self.progress.pack(pady=10)
-        # # Button to load a new image
-        # open_btn = ttk.Button(left_frame, text="Load Video", command=self.open_image)
-        # open_btn.pack(pady=10)
-
-
+       
 
         # Frame to hold buttons side by side
         btn_frame = ttk.Frame(left_frame)
@@ -64,6 +60,19 @@ class StatsGUI:
         self.cancel_btn = ttk.Button(btn_frame, text="Cancel", command=self.cancel_analyze)
         self.cancel_btn.pack(side=tk.LEFT, padx=5)
         self.cancel_btn.config(state='disabled')
+
+
+        #preset selector
+        preset_frame = ttk.Frame(left_frame)
+        preset_frame.pack(pady=5)
+
+        ttk.Label(preset_frame, text="Video Editing Preset:").pack(side=tk.LEFT, padx=5)
+
+        self.ffmpeg_preset = tk.StringVar(value="fast")
+        preset_options = ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"]
+        self.preset_dropdown = ttk.Combobox(preset_frame, textvariable=self.ffmpeg_preset, values=preset_options, state="readonly", width=12)
+        self.preset_dropdown.pack(side=tk.LEFT, padx=5)
+
 
 
 
@@ -136,8 +145,6 @@ class StatsGUI:
         )
 
 
-
-
         # Load default image if available
         if os.path.exists(self.default_image_path):
             self.load_image(self.default_image_path)
@@ -165,9 +172,6 @@ class StatsGUI:
 
             current_row += 1
  
-
-    
-
     
     def apply_filters(self):
         """Collect and print selected filters."""
@@ -187,17 +191,16 @@ class StatsGUI:
             self.image_label.config(image=self.tk_image, text="")
        
 
-
-    
     def open_video(self):
         """Open file dialog to select a new video."""
         file_path = filedialog.askopenfilename(
-            filetypes=[("Video files", "*.mp4 *.mkv *.webm")]
+            filetypes=[("Video files", "*.mp4 *.mkv *.webm *.avi *.mov *.wmv *.flv *.3gp")]
         )
         self.video_path = file_path
         print(f"path:{self.video_path}")
         # if file_path:
         #     self.load_image(file_path)
+
 
     def load_image(self, path):
         """Load and display an image from a path."""
@@ -223,10 +226,14 @@ class StatsGUI:
 
 
     def edit_video(self):
-        print("Editing video...")  # replace with your actual logic
+        print("Editing video...")
         if self.video_path:
             self.stop_event = threading.Event()
-            self.worker_thread = threading.Thread(target=edit_video.remove_low_overlap_segments,args=(self.video_path,self.stop_event,self.progress_callback),daemon=True)
+            self.worker_thread = threading.Thread(
+                target=edit_video.remove_low_overlap_segments,
+                args=(self.video_path, self.stop_event, self.progress_callback, self.ffmpeg_preset.get()),
+                daemon=True
+            )
             self.worker_thread.start()
             self.edit_btn.config(state='disabled')
             self.analyze_btn.config(state='disabled')
@@ -280,14 +287,13 @@ class StatsGUI:
             if metric in self.right_stats:
                 self.right_stats[metric].config(text=round(value,2))
     
-    # def print_metadata(self):
-    #     root.after
+   
 
 if __name__ == "__main__":
     root = tk.Tk()
     sv_ttk.set_theme("dark")
 
-    # app = StatsGUI(root, default_image_path="images/output_table_flipped.jpg")  
+     
     basedir = os.path.dirname(__file__)
     app = StatsGUI(root, default_image_path=os.path.join(basedir, "images/output_table_horizontal.png")) 
     root.mainloop()

@@ -2,7 +2,6 @@ import pandas as pd
 import cv2
 
 
-
 # Bucket rally lengths (e.g., 1-3, 4-6, 7+)
 def bucket_rally(length):
     if length == 2:
@@ -99,9 +98,6 @@ class Stats:
         # Win rate per player per category
         winrate_by_rally = rally_stats.div(total_per_category, axis=1)
 
-        # print(rally_stats)
-        # print(total_per_category)
-        # print(winrate_by_rally)
 
         print(summary_stats)
 
@@ -109,10 +105,7 @@ class Stats:
         return summary_stats
     
     def filter_stats(self,filters):
-        print(filters)
         result_df = self.df[self.df['winner'].isin(filters['Winner']) & self.df['server'].isin(filters['Server']) & self.df['serve_length'].isin(filters['Serve Type']) & self.df['rally_category'].isin(filters['Rally Length'])]
-        print(result_df)
         result = result_df["winning_bounce"].tolist()
-        #???
-        print(result)
+        
         return result

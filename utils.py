@@ -11,8 +11,6 @@ def tensor2array(tensor):
 
 
 
-
-
 # Converts the image from PIL to tensor of the right size
 # Takes as input a list of pil_images
 def preprocess(pil_imgs, size=(640, 320), device="cuda:0"):
@@ -28,7 +26,6 @@ def preprocess(pil_imgs, size=(640, 320), device="cuda:0"):
 def postprocess(t_masks, sizes):
     num_masks = t_masks.shape[0]
     resized_masks = []
-    # print(f"post size:{sizes}")
     for i in range(num_masks):
         mask = tensor2array(t_masks[i].squeeze())
         mask = 255 * mask

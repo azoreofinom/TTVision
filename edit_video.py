@@ -13,19 +13,25 @@ import torch
 from table_segmenter import TableSegmenter
 from PIL import Image
 
-#TODO: explore presets, output fps? grace period. segmentation quality makes or breakes it... also wait until seg mask is stable(setup period)
+#TODO:  grace period. segmentation quality makes or breakes it... also wait until seg mask is stable(setup period). 
+#2 stage progress bar for editing, add visible warnings? just count pixels in intersection instead of IOU. DO THIS FAST, ASK FOR FEEDBACK. 2 DAYS
+#for analysis...take the corners of seg mask etc. hough method was never gonna work well
+#region growing?
 
 DOWNSAMPLE_ROWS = 320
 DOWNSAMPLE_COLS = 640
 ANALYSIS_FPS = 15
-GRACE_BEFORE = 0.0
+GRACE_BEFORE = 1.0
 GRACE_AFTER = 0.2
 
 INIT_SEG_FPS = 5                 # run segmentation at 5 fps
 STABILITY_IOU_THRESHOLD = 0.95   # masks almost identical
-STABILITY_DURATION_SEC = 0.5       # must be stable for 0.5 seconds
+STABILITY_DURATION_SEC = 0.5     # must be stable for 0.5 seconds
 INIT_TIMEOUT_SEC = 10            # max time allowed for init
 
+PIXEL_COUNT_THRESHOLD = 2
+IOU_THRESHOLD = 0.0001
+SECONDS_TO_TRIGGER = 1.5
 
 def has_audio_stream(video_path):
     cmd = [
@@ -53,6 +59,14 @@ def compute_iou(mask1, mask2):
         return 0.0
 
     return intersection / union
+
+def compute_common_pixel_count(mask1,mask2):
+    mask1 = mask1 > 0
+    mask2 = mask2 > 0
+
+    intersection = np.logical_and(mask1, mask2).sum()
+
+    return intersection
 
 
 def merge_intervals(intervals):
@@ -105,7 +119,7 @@ def segment_image(frame, model):
     return masks[0]
 
 
-def compute_stable_segmentation_mask(cap, fps):
+def compute_stable_segmentation_mask(cap, fps, stop_event):
     """
     Runs segmentation at 5 FPS until the mask stabilizes.
     Returns the stable mask and the frame index where init ended.
@@ -122,6 +136,11 @@ def compute_stable_segmentation_mask(cap, fps):
     model = load_model()
     
     while frame_idx < timeout_frames:
+        if stop_event is not None and stop_event.is_set():
+            print("Task cancelled!")
+            #is this right? 
+            return
+        
         ret, frame = cap.read()
         if not ret:
             break
@@ -159,20 +178,46 @@ def compute_stable_segmentation_mask(cap, fps):
     return None, None
 
 
+def remove_large_blobs(mask, max_area=150, kernel_size=10):
+    """
+    Removes large blobs and small blobs that are close enough to be connected by morphological closing.
+
+    Parameters:
+        mask (np.ndarray): Binary input mask.
+        max_area (int): Maximum area to keep blobs.
+        kernel_size (int): Size of the morphological kernel.
+
+    Returns:
+        np.ndarray: Cleaned binary mask.
+    """
+   
+    closed_mask = mask
+
+    # Remove large blobs from closed mask
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(closed_mask, connectivity=8)
+    cleaned = np.zeros_like(mask)
+
+    for i in range(1, num_labels):  # Skip background
+        area = stats[i, cv2.CC_STAT_AREA]
+        if area <= max_area:
+            cleaned[labels == i] = 255
+
+    return cleaned
+
+
+
 def remove_low_overlap_segments(
         video_path,
         stop_event=None,
         progress_callback=None,
+        preset="fast",
         display=False  
         ):
 
     
     base_name = os.path.splitext(os.path.basename(video_path))[0]
-    output_path = f"{base_name}_edited_test.mp4"
-
-    overlap_threshold = 0.0001
-    seconds_to_trigger = 2
-    grace_period = 0.0  # keep a bit before/after motion
+    output_path = f"{base_name}_edited.mp4"
+    
 
     cap = cv2.VideoCapture(video_path)
 
@@ -187,9 +232,7 @@ def remove_low_overlap_segments(
         skip_rate = 1
     
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-    frames_to_trigger = int(seconds_to_trigger * ANALYSIS_FPS)
-    print(frames_to_trigger)
+    frames_to_trigger = int(SECONDS_TO_TRIGGER * ANALYSIS_FPS)
 
     ret, first_frame = cap.read()
     if not ret:
@@ -209,7 +252,11 @@ def remove_low_overlap_segments(
     in_keep_segment = False
     segment_start_frame = 0
 
-    segmentation_mask, frame_idx = compute_stable_segmentation_mask(cap,fps)
+    if stop_event is not None and stop_event.is_set():
+            print("Task cancelled!")
+            #is this right? 
+            return
+    segmentation_mask, frame_idx = compute_stable_segmentation_mask(cap,fps, stop_event)
     if segmentation_mask is not None:
         print(f"initialized, frame ID:{frame_idx}")
     else:
@@ -251,7 +298,11 @@ def remove_low_overlap_segments(
         fg_mask = cv2.medianBlur(fg_mask, 5)
         fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)[1]
 
-        iou = compute_iou(segmentation_mask, fg_mask)
+        #try removing people?
+        fg_mask = remove_large_blobs(fg_mask)
+
+        # iou = compute_iou(segmentation_mask, fg_mask)
+        common_pix = compute_common_pixel_count(segmentation_mask, fg_mask)
 
         if display:
             overlay = downsampled_frame.copy()
@@ -266,14 +317,14 @@ def remove_low_overlap_segments(
             vis = cv2.resize(vis, None, fx=0.7, fy=0.7)
             cv2.putText(
                 vis,
-                f"IoU: {iou:.5f}",
+                f"IoU: {common_pix:.5f}",
                 (20, 40),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 1,
                 (0, 255, 255),
                 2
             )
- 
+            time.sleep(0.1)
             cv2.imshow("Processing", vis)
 
             # press q to quit
@@ -281,7 +332,8 @@ def remove_low_overlap_segments(
                 print("Stopped by user.")
                 break
 
-        if iou < overlap_threshold:
+        # if iou < overlap_threshold:
+        if common_pix < PIXEL_COUNT_THRESHOLD:
             low_overlap_counter += 1
 
             if low_overlap_counter >= frames_to_trigger:
@@ -306,8 +358,8 @@ def remove_low_overlap_segments(
     # Convert frames → seconds + add grace period
     intervals_sec = []
     for start, end in intervals:
-        start_sec = max(0, (start / fps) - grace_period)
-        end_sec = min(total_frames / fps, (end / fps) + grace_period)
+        start_sec = max(0, (start / fps) - GRACE_BEFORE)
+        end_sec = min(total_frames / fps, (end / fps) + GRACE_AFTER)
         intervals_sec.append((start_sec, end_sec))
 
     print(intervals_sec)
@@ -355,7 +407,7 @@ def remove_low_overlap_segments(
         cmd += ["-map", "[outa]"]
 
     cmd += [
-        "-preset", "fast",
+        "-preset", preset,
         output_path
     ]
 
@@ -369,14 +421,16 @@ if __name__ == '__main__':
  
     
     start_t = time.time()
-    remove_low_overlap_segments(
-            "myvideos/wtt.webm",
-            display=True
-        )
     # remove_low_overlap_segments(
-    #     "openData/game_4.mp4",
-    #     display=True
-    # )
+    #         "myvideos/test.mp4",
+    #         display=True,
+    #         preset="ultrafast"
+    #     )
+    remove_low_overlap_segments(
+        "openData/game_4.mp4",
+        display=False,
+        preset="ultrafast"
+    )
     end_t = time.time()
     print(end_t-start_t)
     profiler.disable()
