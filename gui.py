@@ -1,13 +1,33 @@
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import ttk, filedialog, messagebox
 import sv_ttk
 from PIL import Image, ImageTk,ImageDraw
 import os
-import serve_detection_lab
+import analyze_video
 import threading
 import queue
 import stats
 import edit_video
+import sys
+import pywinstyles
+
+def apply_theme_to_titlebar(root):
+    version = sys.getwindowsversion()
+
+    if version.major == 10 and version.build >= 22000:
+        # Windows 11 – change only titlebar color
+        pywinstyles.change_header_color(
+            root,
+            "#1c1c1c" if sv_ttk.get_theme() == "dark" else "#fafafa"
+        )
+
+    elif version.major == 10:
+        # Windows 10 – enable dark titlebar without touching widget styling
+        pywinstyles.change_header_color(root, "#1c1c1c")
+
+        # force refresh of titlebar
+        root.wm_attributes("-alpha", 0.99)
+        root.wm_attributes("-alpha", 1)
 
 class StatsGUI:
     def __init__(self, root, default_image_path="example_image.jpg"):
@@ -19,6 +39,7 @@ class StatsGUI:
         self.stop_event = None
         self.worker_thread = None
         self.metadata_queue = queue.Queue()
+        self.warning_queue = queue.Queue()
         self.game_metadata = None
         self.game_summary = None
         self.stats_object = None
@@ -112,24 +133,24 @@ class StatsGUI:
         right_col.grid(row=0, column=2, sticky="n", padx=(10, 0))
 
         # Column headers
-        ttk.Label(left_col, text="Left Player", font=("Arial", 12, "bold")).pack(pady=5)
-        ttk.Label(mid_col, text="Metric", font=("Arial", 12, "bold")).pack(pady=5)
-        ttk.Label(right_col, text="Right Player", font=("Arial", 12, "bold")).pack(pady=5)
+        ttk.Label(left_col, text="Left Player", font=("Arial", 12, "bold")).pack(pady=15)
+        ttk.Label(mid_col, text="Metric", font=("Arial", 12, "bold")).pack(pady=15)
+        ttk.Label(right_col, text="Right Player", font=("Arial", 12, "bold")).pack(pady=15)
 
         # Metrics
-        self.metrics = ["Points Won", "Points won on own serve","Points won on opponent serve","Serve Win %", "Biggest lead","Most consecutive won","Greatest deficit overcome" ,"Avg Rally Length (Win)"]
+        self.metrics = ["Points Won", "Points won on own serve","Points won on opponent serve","Serve Win %", "Receive Win %", "Most consecutive won", "Avg Rally Length (Win)"]
         self.left_stats = {}
         self.right_stats = {}
 
         for metric in self.metrics:
-            ttk.Label(mid_col, text=metric).pack(pady=10)
+            ttk.Label(mid_col, text=metric).pack(pady=12)
             
             l_label = ttk.Label(left_col, text="--")
-            l_label.pack(pady=10)
+            l_label.pack(pady=12)
             self.left_stats[metric] = l_label
 
             r_label = ttk.Label(right_col, text="--")
-            r_label.pack(pady=10)
+            r_label.pack(pady=12)
             self.right_stats[metric] = r_label
 
        
@@ -150,6 +171,8 @@ class StatsGUI:
             self.load_image(self.default_image_path)
         else:
             self.image_label.config(text="Default image not found")
+
+        self.root.after(200, self.check_warning_queue)
 
 
     def create_filters(self, parent):
@@ -214,7 +237,7 @@ class StatsGUI:
         print("Analyzing video...")  # replace with your actual logic
         if self.video_path:
             self.stop_event = threading.Event()
-            self.worker_thread = threading.Thread(target=serve_detection_lab.main,args=(self.video_path,self.stop_event,self.metadata_queue,self.progress_callback),daemon=True)
+            self.worker_thread = threading.Thread(target=analyze_video.main,args=(self.video_path,self.stop_event,self.metadata_queue,self.warning_queue,self.progress_callback),daemon=True)
             self.worker_thread.start()
             self.edit_btn.config(state='disabled')
             self.analyze_btn.config(state='disabled')
@@ -231,7 +254,7 @@ class StatsGUI:
             self.stop_event = threading.Event()
             self.worker_thread = threading.Thread(
                 target=edit_video.remove_low_overlap_segments,
-                args=(self.video_path, self.stop_event, self.progress_callback, self.ffmpeg_preset.get()),
+                args=(self.video_path, self.stop_event, self.progress_callback, self.ffmpeg_preset.get(), self.warning_queue),
                 daemon=True
             )
             self.worker_thread.start()
@@ -262,6 +285,7 @@ class StatsGUI:
         if percent >= 100:
             # self.root.after(0, lambda: self.update_status("Done!"))
             self.root.after(0, lambda: self.analyze_btn.config(state='normal'))
+            self.root.after(0, lambda: self.edit_btn.config(state='normal'))
             self.root.after(0, lambda: self.cancel_btn.config(state='disabled'))
             if not self.metadata_queue.empty():
                 self.stats_object = stats.Stats(self.metadata_queue.get())
@@ -287,13 +311,28 @@ class StatsGUI:
             if metric in self.right_stats:
                 self.right_stats[metric].config(text=round(value,2))
     
+  
+    def check_warning_queue(self):
+        try:
+            while True:
+                msg = self.warning_queue.get_nowait()
+                messagebox.showwarning("Warning", msg)
+                self.cancel_btn.config(state='disabled')
+                self.analyze_btn.config(state='normal')
+                self.edit_btn.config(state='normal')
+
+        except queue.Empty:
+            pass
+
+        self.root.after(200, self.check_warning_queue)
    
 
 if __name__ == "__main__":
     root = tk.Tk()
     sv_ttk.set_theme("dark")
-
-     
     basedir = os.path.dirname(__file__)
     app = StatsGUI(root, default_image_path=os.path.join(basedir, "images/output_table_horizontal.png")) 
+    if sys.platform.startswith("win"):
+        apply_theme_to_titlebar(root)
+    
     root.mainloop()

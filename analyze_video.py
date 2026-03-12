@@ -10,9 +10,7 @@ import cv2
 import numpy as np
 import shapely
 
-# import find_table
-import fast_find_table
-import stats
+import mask_processing
 
 
 class BallCandidate:
@@ -34,15 +32,11 @@ class BallCandidate:
 
 
 
-# DOWNSAMPLE_ROWS = 360
-# DOWNSAMPLE_COLS = 640
-
 DOWNSAMPLE_ROWS = 540
 DOWNSAMPLE_COLS = 960
 
-#MIN_DIST_FROM_OTHER_CONTOURS = DOWNSAMPLE_COLS //15 
-#OVERLAPPING_CONTOUR_DIST = 10 /2
-MIN_RADIUS = 0 # this is a bit scuffed...
+
+MIN_RADIUS = 0 
 MAX_RADIUS = 8
 MIN_TOSS_AREA = 5
 MIN_TOSS_CIRCULARITY = 0.8
@@ -51,11 +45,13 @@ TRACKING_WINDOW_HEIGHT = DOWNSAMPLE_ROWS // 4
 TRACKING_WINDOW_WIDTH = DOWNSAMPLE_COLS // 4
 MAX_TRACKING_DIST = math.sqrt(TRACKING_WINDOW_HEIGHT**2 + TRACKING_WINDOW_WIDTH**2)
 MAX_COLOR_DIFF = 80
-
-MAX_AREA_RATIO = 15
+MIN_AREA_RATIO = 1/3
+MAX_AREA_RATIO = 10
 
 #represents the predicted change in X coord of the ball when it hasn't been detected for at least 1 frame. percentage of table length.  
 PREDICTED_POSITION_RATIO = 0.1
+
+FRAME_COUNT_TO_TRIGGER_RECOVERY = 8
 
 
 def vector_length(v):
@@ -67,7 +63,7 @@ def get_ball_candidates(frame_mask, strict_table_quad, fgMask, serve_like_events
     contours, _ = cv2.findContours(frame_mask, cv2.RETR_EXTERNAL     , cv2.CHAIN_APPROX_NONE)
     good_contours = []
 
-    for i,cnt in enumerate(contours):
+    for cnt in contours:
         area = cv2.contourArea(cnt)
         radius = math.sqrt(area / math.pi)
         perimeter = cv2.arcLength(cnt, True)
@@ -79,16 +75,13 @@ def get_ball_candidates(frame_mask, strict_table_quad, fgMask, serve_like_events
         if radius >= MAX_RADIUS or radius<MIN_RADIUS or circularity<MIN_TOSS_CIRCULARITY:
             continue
 
-       
         good_contours.append(cnt)
 
     
     contours_inside_table = []
-    if len(serve_like_events)>0:
-    
+    if len(serve_like_events)>0:    
         contours, _ = cv2.findContours(fgMask, cv2.RETR_EXTERNAL     , cv2.CHAIN_APPROX_NONE)
-        
-        for i,cnt in enumerate(contours):
+        for cnt in contours:
             area = cv2.contourArea(cnt)
             perimeter = cv2.arcLength(cnt, True)
             if perimeter==0 or area < 10:
@@ -99,7 +92,6 @@ def get_ball_candidates(frame_mask, strict_table_quad, fgMask, serve_like_events
             if cnt_pos[1]<table_bottom and (strict_table_quad.contains(shapely.Point(bot_pos)) or strict_table_quad.contains(shapely.Point(cnt_pos))):
                 contours_inside_table.append(cnt)
                 
-
     return good_contours, contours_inside_table
 
 
@@ -108,7 +100,6 @@ def get_ball_during_point(frame_mask,hsv,ball_history,left,right,roi_l,roi_r,tos
     if len(ball_history)>0:
         prev_ball = ball_history[-1]
         prev_pos = prev_ball.position
-        prev_cnt = prev_ball.contour
         prev_color = prev_ball.color
         prev_area = prev_ball.area
 
@@ -130,9 +121,8 @@ def get_ball_during_point(frame_mask,hsv,ball_history,left,right,roi_l,roi_r,tos
     best_contour = None
     shortest_dist = float('inf')
     ball_area = toss_ball.area
-    toss_color = toss_ball.color
 
-    for i,cnt in enumerate(contours):
+    for cnt in contours:
         pos = get_cnt_centroid(cnt)
         color = get_cnt_color2(cnt,hsv)
         
@@ -144,29 +134,19 @@ def get_ball_during_point(frame_mask,hsv,ball_history,left,right,roi_l,roi_r,tos
             continue
         
         area = cv2.contourArea(cnt)
-        radius = math.sqrt(area / math.pi)
         perimeter = cv2.arcLength(cnt, True)
         if perimeter == 0 or area == 0:
             continue
         
         if pos[0]==prev_pos[0]:
-            print("excluded,same pos")
             continue
 
         if not (pos[0]>=possible_x_range[0] and pos[0]<=possible_x_range[1]):
-            print("excluded,wrong direction")
             continue
 
-        if area < ball_area/3 or area>ball_area*10: 
-            print(f"excluded candidate:{area/ball_area} {radius} ") 
+        if area < ball_area * MIN_AREA_RATIO or area>ball_area*MAX_AREA_RATIO: 
             continue
 
-        #print(f"candidate:{area/ball_area} {radius} {circularity}") 
-        # ellipse = cv2.fitEllipse(cnt)
-        # center, axes, angle = ellipse
-        #print(f"Center: {center}")
-        #print(f"Axes: {axes} (Major, Minor)")
-       # print(f"Angle: {angle} degrees")
 
         velocity = tuple(np.subtract(pos, ball_history[-1].position))
         if prev_velocity is None or (velocity[0]>0 and prev_velocity[0]>0) or (velocity[0]<0 and prev_velocity[0]<0):
@@ -181,13 +161,10 @@ def get_ball_during_point(frame_mask,hsv,ball_history,left,right,roi_l,roi_r,tos
             max_dist = (right-left) / 6
 
         if area < min_area or area>max_area: 
-            print(f"excluded candidate:{area/prev_area} ") 
             continue
             
             
-        if math.dist(color,prev_color)>max_color_diff: #or math.dist(color,toss_color)>MAX_COLOR_DIFF:          
-            print(f"excluded due to color:{color}")
-            print(get_cnt_color(cnt,hsv))
+        if math.dist(color,prev_color)>max_color_diff:          
             continue
 
 
@@ -196,7 +173,6 @@ def get_ball_during_point(frame_mask,hsv,ball_history,left,right,roi_l,roi_r,tos
             dist = min(dist, math.dist(pos,pred_pos))
         
         if dist>max_dist:
-            print("excluded,too far")
             continue
         
         if dist < shortest_dist:
@@ -209,25 +185,22 @@ def recover_ball(frame_mask,toss_ball,strict_table_quad, ball_history,hsv):
     contours, _ = cv2.findContours(frame_mask, cv2.RETR_EXTERNAL     , cv2.CHAIN_APPROX_NONE)
     ball_area = toss_ball.area
 
-    for i,cnt in enumerate(contours):
+    for cnt in contours:
         area = cv2.contourArea(cnt)
         perimeter = cv2.arcLength(cnt, True)
         if perimeter==0 or area < 10:
             continue
         
-        if area < ball_area/3 or area>ball_area*10: 
-            print(f"excluded candidate:{area/ball_area}") 
+        if area < ball_area*MIN_AREA_RATIO or area>ball_area*MAX_AREA_RATIO: 
             continue
         
         color = get_cnt_color2(cnt,hsv)
         prev_color = ball_history[-1].color
-
-        if math.dist(color,prev_color)>MAX_COLOR_DIFF: #or math.dist(color,toss_color)>MAX_COLOR_DIFF:          
+        if math.dist(color,prev_color)>MAX_COLOR_DIFF:           
             continue
 
         cnt_pos = get_cnt_centroid(cnt)
         bot_pos = get_cnt_bottom(cnt)
-
         if (strict_table_quad.contains(shapely.Point(bot_pos)) or strict_table_quad.contains(shapely.Point(cnt_pos))):
             return cnt
         
@@ -242,8 +215,10 @@ def get_cnt_centroid(contour):
    cY = int(M["m01"] / M["m00"])
    return cX,cY
 
+
 def get_cnt_bottom(cnt):
     return tuple(cnt[cnt[:,:,1].argmax()][0])
+
 
 def get_cnt_color(cnt, hsv):
     mask = np.zeros(hsv.shape[:2], np.uint8)
@@ -251,9 +226,9 @@ def get_cnt_color(cnt, hsv):
     mean = cv2.mean(hsv, mask=mask)
     return mean
 
+
 def get_cnt_color2(cnt,frame):
     dirs = [[0,-1],[0,1],[-1,0],[1,0],[0,0]]
-
     center = get_cnt_centroid(cnt)
     pixel_values = []
     for dir in dirs:
@@ -267,6 +242,7 @@ def get_cnt_color2(cnt,frame):
     means = np.mean(arr, axis=0)
     return tuple(means.astype(int))
 
+
 def get_cnt_median_color(cnt,frame):
     dirs = [[0,-1],[0,1],[-1,0],[1,0],[0,0]]
     center = get_cnt_centroid(cnt)
@@ -276,8 +252,6 @@ def get_cnt_median_color(cnt,frame):
     arr = np.array(pixel_values)
     medians = np.median(arr, axis=0)
     return tuple(medians.astype(int))
-
-
 
 
 def point_side(a, b, p):
@@ -290,7 +264,6 @@ def point_side(a, b, p):
         return "Right"
     
     
-
 def create_point(point_id, set_number, server, receiver, winner, start, end, bounces,serve_bounce):
     return {
         "point_id": point_id,
@@ -307,13 +280,15 @@ def create_point(point_id, set_number, server, receiver, winner, start, end, bou
         "winning_bounce":bounces[-1]
     }
 
+
 def transformed_bounce_side(pos):
     table_midpoint = 445
     if pos[1]<table_midpoint: 
         return "Left"
     else:
         return "Right"
-    
+
+
 def horizontal_transformed_bounce_side(pos):
     table_midpoint = 385
     if pos[0]<table_midpoint: 
@@ -321,13 +296,13 @@ def horizontal_transformed_bounce_side(pos):
     else:
         return "Right"
 
-def is_point_over(frames_since_ball, last_bounce_frame, curr_frame, real_fps,analysis_fps, bounces,ball_history):
-    #if ball tracking gets very robust, maybe track the ball in the whole image, not just over the table and look at bounces on the floor?
 
+def is_point_over(frames_since_ball, last_bounce_frame, curr_frame, real_fps,analysis_fps, bounces,ball_history):
+    
     if frames_since_ball > analysis_fps:
         print(f"{analysis_fps} frames since the last ball detection, point over")
         return True
-    #NEEDS TUNING
+  
     if (curr_frame - last_bounce_frame) > 3*real_fps:
         print(f"{3*real_fps} frames since the last bounce, point over")
         return True
@@ -342,77 +317,38 @@ def is_point_over(frames_since_ball, last_bounce_frame, curr_frame, real_fps,ana
     
     return False
 
-def remove_large_blobs(mask, max_area=150, kernel_size=10):
-    """
-    Removes large blobs and small blobs that are close enough to be connected by morphological closing.
-
-    Parameters:
-        mask (np.ndarray): Binary input mask.
-        max_area (int): Maximum area to keep blobs.
-        kernel_size (int): Size of the morphological kernel.
-
-    Returns:
-        np.ndarray: Cleaned binary mask.
-    """
-    # Ensure binary
-    # mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)[1]
-
-    # Morphological closing to connect close blobs
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-
-
-    #closed_mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    closed_mask = mask
-
-    # Remove large blobs from closed mask
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(closed_mask, connectivity=8)
-    cleaned = np.zeros_like(mask)
-
-    for i in range(1, num_labels):  # Skip background
-        area = stats[i, cv2.CC_STAT_AREA]
-        if area <= max_area:
-            cleaned[labels == i] = 255
-
-    return cleaned
 
 def get_roi_bounds(ball_pos, table_left_end, table_right_end, table_bottom):
     if ball_pos[0]-TRACKING_WINDOW_WIDTH//2 < table_left_end:
         roi_topleft = (table_left_end,max(0,ball_pos[1]-int(TRACKING_WINDOW_HEIGHT*1.5)))
         roi_botright = (table_left_end + TRACKING_WINDOW_WIDTH,table_bottom)
-    
     elif ball_pos[0]+TRACKING_WINDOW_WIDTH//2 > table_right_end:
         roi_botright = (table_right_end,table_bottom)
         roi_topleft = (table_right_end - TRACKING_WINDOW_WIDTH, max(0,ball_pos[1]-int(TRACKING_WINDOW_HEIGHT*1.5)))
-
     else:
         roi_topleft = (ball_pos[0]-TRACKING_WINDOW_WIDTH//2,max(0,ball_pos[1]-int(TRACKING_WINDOW_HEIGHT*1.5)))
         roi_botright = (ball_pos[0]+TRACKING_WINDOW_WIDTH//2,table_bottom)
 
     return roi_topleft, roi_botright
 
+
 def is_bounce(ball_history, table_quad,skip_rate):
     bounce_pos = get_cnt_bottom(ball_history[-2].contour)
     if len(ball_history)<3 or not table_quad.contains(shapely.Point(bounce_pos)):
-        if not table_quad.contains(shapely.Point(bounce_pos)):
-            print("bounce outside table")
-
         return False
     
     t1 = ball_history[-1].frame-ball_history[-2].frame
     t2 = ball_history[-2].frame-ball_history[-3].frame
     vel2 = tuple(np.subtract(ball_history[-2].position, ball_history[-3].position))
     vel3 = tuple(np.subtract(ball_history[-1].position, ball_history[-2].position))
-   
+
     if t1==t2==skip_rate and vel2[1]>0 and vel3[1]<0:
         return True
     
-    #TESTING
     if t1==t2==skip_rate and vel2[1]>0 and vel3[1]<(vel2[1]-1):
-        print("BOUNCE FOUND USING NEW CONDITION")
         return True
     
     if len(ball_history)>3:
-
         vel1 = tuple(np.subtract(ball_history[-3].position, ball_history[-4].position))
         t3 = ball_history[-3].frame-ball_history[-4].frame
         if (t1==t2==t3==skip_rate and vel1[1]>0 and vel2[1]==0 and vel3[1]<0):
@@ -420,8 +356,10 @@ def is_bounce(ball_history, table_quad,skip_rate):
         
     return False
 
+
 def is_possible_distortion(ball_radius, contour):
     pass
+
 
 def get_new_predicted_positions(curr_frame,ball_history,server,left_serve_pos,right_serve_pos,table_length,skip_rate):
     if len(ball_history)==0:
@@ -438,8 +376,6 @@ def get_new_predicted_positions(curr_frame,ball_history,server,left_serve_pos,ri
         
         return [tuple(np.add(np.array(ball_history[-1].position), np.array(predicted_velocity)).tolist())]
     
-
-
     else:
         if ball_history[-1].frame == curr_frame and (ball_history[-1].frame - ball_history[-2].frame) == skip_rate:
             velocity = tuple(np.subtract(ball_history[-1].position, ball_history[-2].position))
@@ -452,6 +388,7 @@ def get_new_predicted_positions(curr_frame,ball_history,server,left_serve_pos,ri
             pred2 = tuple(np.add(np.array(ball_history[-1].position), np.array(predicted_velocity)).tolist())
         return [pred1,pred2]
 
+
 def get_next_data(iterator):
     try:
         item = next(iterator)
@@ -461,6 +398,7 @@ def get_next_data(iterator):
         return frame_num, x, y
     except StopIteration:
         return None
+
 
 def is_table_view(frame, table_mask):
     edges = cv2.Canny(frame,80,200)
@@ -477,17 +415,10 @@ def get_white_threshold(frame,mask):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     v_channel = hsv[:, :, 2]
     s_channel = hsv[:, :, 1]
-
-    
     only_moving_parts = cv2.bitwise_and(hsv,hsv, mask=mask)
-    # toshow = cv2.bitwise_and(frame,frame, mask=mask)
-    # hsv_moving =  cv2.cvtColor(only_moving_parts, cv2.COLOR_BGR2HSV)
-    # cv2.imshow("hehe",toshow)
-
+   
     ve_channel = only_moving_parts[:, :, 2]
     se_channel = only_moving_parts[:, :, 1]
-
-    
 
     # Flatten the V channel and filter out zeros
     ve_values = ve_channel.flatten()
@@ -499,29 +430,18 @@ def get_white_threshold(frame,mask):
     if len(ve_nonzero)>0 and len(se_nonzero)>0:
         ve_thresh = np.percentile(ve_nonzero, 70)
         se_thresh = np.percentile(se_nonzero, 50)
-        
-    
-        # print('MOVING THRESHOLDS')
-        # print(ve_thresh)
-        # print(se_thresh)
         binary_map = (v_channel >= ve_thresh) & (s_channel <= se_thresh)
-        # Convert boolean mask to uint8 (0 or 1)
-        
         binary_image = (binary_map.astype(np.uint8)) * 255
         binary_image = cv2.bitwise_and(binary_image,mask)
         return ve_thresh, se_thresh
     else:
         return 0, 255
-        # cv2.imshow("white mask", binary_image)
+      
+
 
 def apply_white_filter(frame, mask, ve_thresh, se_thresh):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-
-    # binary_map = (v_channel >= ve_thresh) & (s_channel <= se_thresh)
     binary_map = cv2.inRange(hsv,(0,0,ve_thresh),(179,se_thresh,255))
-    # Convert boolean mask to uint8 (0 or 1)
-    
-    # binary_image = (binary_map.astype(np.uint8)) * 255
     binary_image = cv2.bitwise_and(binary_map,mask)
 
     return binary_image
@@ -542,23 +462,8 @@ def update_serve_candidates(serve_candidates, ball_candidates, frame_count,table
                 if 0 < math.dist(ball_cand_pos, serve_cand[-1].position)<max_dist and (frame_count-serve_cand[-1].frame)>0:
                     
                     serve_cand.append(BallCandidate(1,1,ball_cand_pos, frame_count,ball_cand,ball_cand_color,ball_cand_area))
-
                     if len(serve_cand)>=2:
                         serve_events.append(BallCandidate(1,1,ball_cand_pos, frame_count,ball_cand,ball_cand_color,ball_cand_area))
-                        print("PROBABLY TOSS!!")
-                        print(ball_cand_area)
-                        print(ball_cand_color)
-
-                        # cv2.drawContours(frame, ball_cand, -1, (0, 0, 255), 1)
-                        # cv2.namedWindow("Frame difference", cv2.WINDOW_NORMAL)
-                        # cv2.resizeWindow("Frame difference", 800, 600)
-                        # cv2.imshow('Frame difference', frame)
-
-                        
-                        # key = cv2.waitKey(0) & 0xFF
-                        # if key == ord('q'):
-                        #     break
-
                     found = True
                     break
 
@@ -567,52 +472,35 @@ def update_serve_candidates(serve_candidates, ball_candidates, frame_count,table
     
     
 
-    serve_events = [event for event in serve_events if frame_count - event.frame < fps*1.2]
-    print(serve_events)
+    serve_events[:] = [event for event in serve_events if frame_count - event.frame < fps*1.2]
     return serve_candidates
+
 
 def point_is_starting(mask, strict_table_quad, serve_like_events, contours_inside_table,frame_count,real_fps,hsv, midpoint1,midpoint2):
     if len(serve_like_events)==0 or len(contours_inside_table)==0:
         return False, None, None
     
-    
     for cnt_on_table in contours_inside_table:
         pos = get_cnt_centroid(cnt_on_table)
         color = get_cnt_color2(cnt_on_table,hsv)
-        # colorr = get_cnt_color(cnt_on_table,hsv)
-        # median_color = get_cnt_median_color(cnt_on_table,hsv)
         inside_side = point_side(midpoint2,midpoint1, pos)
         inside_area = cv2.contourArea(cnt_on_table)
 
-        print("contour on table:")
-        print(color)
-       
-
-        print(inside_area)
-        print(f"Side:{ point_side(midpoint2,midpoint1, pos)}")
+        
 
         for serve_event in serve_like_events:
             serve_pos = get_cnt_centroid(serve_event.contour)
             serve_area = serve_event.area
-            # print(point_side(midpoint2,midpoint1, serve_pos))
-            # print(serve_event)
-
-
+          
             if (frame_count - serve_event.frame < 1.1*real_fps  
-                and 0.8<inside_area/serve_area<5 and math.dist(color,serve_event.color)<MAX_COLOR_DIFF ): #and point_side(midpoint2,midpoint1, serve_pos)==inside_side:
-                print("serve color diff")
-                print(serve_event.color)
-                print(color)
-                print("area diff")
-                print(serve_area)
-                print(inside_area)
-
+                and 0.8<inside_area/serve_area<5 and math.dist(color,serve_event.color)<MAX_COLOR_DIFF ): 
+          
                 serve_like_events.remove(serve_event) #it shouldn't be reused. if early exit, don't repeat 
 
                 return True, serve_event, cnt_on_table
 
-    
     return False, None,  None
+
 
 def get_possible_x_range(ball_history,server, midpoint1,midpoint2,table_left_end,table_right_end, frames_since_ball):
     if len(ball_history)==0 or frames_since_ball>=5:
@@ -621,27 +509,27 @@ def get_possible_x_range(ball_history,server, midpoint1,midpoint2,table_left_end
     side = point_side(midpoint2,midpoint1,prev_pos)
     
     
-    if len(ball_history)==1: #or 1?
+    if len(ball_history)==1: 
         if server=="Left":
             return [prev_pos[0],DOWNSAMPLE_COLS]
         else:
             return [0,prev_pos[0]]
     else:
         velocity = tuple(np.subtract(ball_history[-1].position, ball_history[-2].position))
-        # print(f"velocity:{velocity}")
+        
         if side=="Left" and velocity[0]>0:
             return [prev_pos[0],DOWNSAMPLE_COLS]
         elif side=="Right" and velocity[0]<0:
             return [0,prev_pos[0]]
         
         #this is specific to when only tracking inside table bounds
-
         if prev_pos[0]+velocity[0]<table_left_end:
             return [prev_pos[0],DOWNSAMPLE_COLS]
         elif prev_pos[0]+velocity[0]>table_right_end:
             return [0,prev_pos[0]]
     
     return [0,DOWNSAMPLE_COLS]
+
 
 def timestamp_to_framecount(filepath,fps):
     # Read timestamps from a text file
@@ -666,25 +554,19 @@ def timestamp_to_framecount(filepath,fps):
 def process_bounce_pos(bounce_pos):
     cols = 770
     rows = 434
-
     x = max(0, min(bounce_pos[0][0][0], cols-1))
     y = max(0, min(bounce_pos[0][0][1], rows-1))
     return (int(x),int(y))
 
 
-def main(video_path, stop_event=None, metadata_queue = None, progress_callback = None, display=False, eval = False):
-
-    overall_start = time.time()
+def main(video_path, stop_event=None, metadata_queue = None, warning_queue = None, progress_callback = None, display=False, eval = False):
     capture = cv2.VideoCapture(video_path)
-
-    # output = cv2.imread('images/output_table_flipped.jpg')
 
     output = cv2.imread('images/output_table_horizontal.png')
     fps = capture.get(cv2.CAP_PROP_FPS)
 
-    #evaluation stuff
     if eval:
-        BALL_POS_PATH = 'openData/game_3/ball_markup.json'
+        BALL_POS_PATH = 'openData/game_4/ball_markup.json'
         with open(BALL_POS_PATH) as json_file:
             data = json.load(json_file)
 
@@ -700,95 +582,53 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
         serve_timestamps = timestamp_to_framecount("openData/game_3/serves.txt", fps)
 
     backSub = cv2.createBackgroundSubtractorMOG2(varThreshold=12, detectShadows=True, history=int(fps)*20)
-    print(backSub.getNMixtures())
-    print(backSub.getShadowThreshold())
-    print(backSub.getDetectShadows())
-    print(backSub.getBackgroundRatio())
-    print(backSub.getHistory())
-    #backSub.setShadowThreshold(0.25)
-    
     nr_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
     
-    # if fps>=60:
-    #     skip_rate = round(fps/60)
-    # else:
-    #     skip_rate = 1
-
     if fps>=30:
         skip_rate = round(fps/30)
     else:
         skip_rate = 1
 
     analysis_fps  = round(fps/skip_rate)
-    print(fps)
-    print(skip_rate)
-
-    
-    
-
-
     ball_history = collections.deque()
     history = 10
     point_started = False
-    high_confidence_count = 0
     frames_since_ball = 0
     last_high_conf_area = 10
-
     frame_count = 0
     ret,prev_frame = capture.read()
 
     original_rows = prev_frame.shape[0]
     original_cols = prev_frame.shape[1]
-    print(original_cols)
-
     scale_x = original_cols / DOWNSAMPLE_COLS
     scale_y = original_rows / DOWNSAMPLE_ROWS
     
+    segmentation_mask, corners, frame_count = mask_processing.compute_stable_segmentation_mask(capture,fps, stop_event)
+    table_quad = shapely.Polygon(corners)
 
-    tries = 0
-    table_quad = None
-    while table_quad is None and tries<100:
-        #for WTT specifically
-        if frame_count>50:
-            # prev_frame = cv2.resize(prev_frame,(DOWNSAMPLE_COLS,DOWNSAMPLE_ROWS),interpolation=cv2.INTER_AREA)
-            #table_quad = find_table.find_table(prev_frame,display=False)
-            table_quad = fast_find_table.find_table(prev_frame,display=False)
-            tries +=1
-        ret,prev_frame = capture.read()
-        frame_count += 1
-        print(f"FINDING TABLE ATTEMPT NR:{tries}")  
-    
-    #wtt2
-    #table_coords = [(681, 520), (644, 668), (1270, 666), (1232, 521), (681, 520)]
-
-    #game 1 [(249, 673), (1458, 691), (1290, 540), (503, 527), (249, 673)]
+    if not (segmentation_mask is not None and table_quad.is_valid and table_quad.is_simple):
+        if warning_queue:
+            warning_queue.put("Table not found. Try using a different video or make sure the camera is stationary after the first 30s!")
+        return
 
     table_coords = [ (int(round(x)), int(round(y))) for x, y in  list(table_quad.exterior.coords) ]
-    print(table_coords)
-    height, width = prev_frame.shape[:2]
-    np_coords = np.int32(table_coords)
-    print(np.int32([table_coords]))
-    table_mask = np.zeros((height, width), dtype=np.uint8)
-    cv2.polylines(table_mask,np.int32([table_coords]), True, 255)
+
+    # height, width = prev_frame.shape[:2]
+    # table_mask = np.zeros((height, width), dtype=np.uint8)
+    # cv2.polylines(table_mask,np.int32([table_coords]), True, 255)
    
-
-    scaled_coords = [(int(x/scale_x), int(y/scale_y)) for x,y in table_coords]
-    table_coords=scaled_coords
-
-    print(f"scaled:{scaled_coords}")
+    scaled_coords = [(int(x/segmentation_mask.shape[1]*DOWNSAMPLE_COLS), int(y/segmentation_mask.shape[0]*DOWNSAMPLE_ROWS)) for x,y in table_coords]
     table_quad = shapely.Polygon(scaled_coords)
-
     strict_table_quad = table_quad.buffer(0, join_style="mitre")
     #this should help include bounces which are right on the boundary of the table
     table_quad = table_quad.buffer(5, join_style="mitre")
 
-    
     if table_quad:
         shapely.prepare(table_quad)
         shapely.prepare(strict_table_quad)
     else:
         print("table not found")
-
+        return
 
     col_values = [x[0] for x in scaled_coords]
     row_values = [x[1] for x in scaled_coords]
@@ -797,9 +637,6 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
     table_bottom = max(row_values)
     table_length = table_right_end - table_left_end
 
-    #EXTENDING TRACKING REGION: TESTING!
-    # table_left_end -= 100
-    # table_right_end += 100
 
     #WHOLE IMAGE TRACKING
     table_left_end = 0
@@ -811,34 +648,24 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
     inner_right = col_values[-2]
  
     table_edges = []
-    for i in range(len(table_coords)-1):
-        if table_coords[i][0] <= table_coords[i+1][0]:
-            left =  table_coords[i]
-            right = table_coords[i+1]
+    for i in range(len(scaled_coords)-1):
+        if scaled_coords[i][0] <= scaled_coords[i+1][0]:
+            left =  scaled_coords[i]
+            right = scaled_coords[i+1]
         else:
-            left =  table_coords[i+1]
-            right = table_coords[i]
+            left =  scaled_coords[i+1]
+            right = scaled_coords[i]
 
-        # table_edges.append((-math.dist(table_coords[i], table_coords[i+1]), table_coords[i],table_coords[i+1]))
-        table_edges.append((-math.dist(table_coords[i], table_coords[i+1]), left,right))
-
+        table_edges.append((-math.dist(scaled_coords[i], scaled_coords[i+1]), left,right))
 
 
     heapq.heapify(table_edges)
 
     #points for transforming points from side angle to top angle
     src_pts = []
-
-    #vertical points
-    # dst_pts = [(32,60),(32,828),(466,60),(466,828)]
-
-    #horizontal points
     dst_pts = [(0,433),(769,433),(0,0),(769,0)]
 
     larg = heapq.heappop(table_edges)
-
-
-
     src_pts.append((larg[1][0],larg[1][1]))
     src_pts.append((larg[2][0],larg[2][1]))
     midpoint1 = ((larg[1][0]+larg[2][0])//2, (larg[1][1]+larg[2][1])//2)
@@ -846,56 +673,24 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
     src_pts.append((larg[1][0],larg[1][1]))
     src_pts.append((larg[2][0],larg[2][1]))
     midpoint2 = ((larg[1][0]+larg[2][0])//2, (larg[1][1]+larg[2][1])//2)
-  
-
-    # prev_frame = cv2.resize(prev_frame,(DOWNSAMPLE_COLS,DOWNSAMPLE_ROWS),interpolation=cv2.INTER_AREA)
-    # cv2.line(prev_frame, midpoint1, midpoint2, (0,0,255), 1)
-    # cv2.imshow("?", prev_frame)
-    # cv2.waitKey(0)
-    # cv2.destroyAllWindows()
-
+    
     src_pts = np.float32(src_pts)
     dst_pts = np.float32(dst_pts)
-
     M, mask = cv2.findHomography(src_pts, dst_pts,0)
     reverse_M = np.linalg.inv(M)
-
-    #VERTICAL
-    # left_serve_spot = (250,200)
-    # right_serve_spot = (250,690)
 
     #HORIZONTAL
     left_serve_spot = (100,216)
     right_serve_spot = (669,216)
-
     transformed_left = cv2.perspectiveTransform(np.float32([left_serve_spot]).reshape(-1,1,2),reverse_M)[0][0]
     transformed_left = (int(transformed_left[0]),int(transformed_left[1]))
     transformed_right = cv2.perspectiveTransform(np.float32([right_serve_spot]).reshape(-1,1,2),reverse_M)[0][0]
     transformed_right = (int(transformed_right[0]),int(transformed_right[1]))
     
-
-    left_edge = heapq.heappop(table_edges)
-    print(f"left:{left_edge}")
-    right_edge = heapq.heappop(table_edges)
-    print(right_edge)
-    if (right_edge[1][0]<left_edge[1][0]):
-        left_edge, right_edge = right_edge, left_edge
-
-
-
-    prev_frame = cv2.resize(prev_frame,(DOWNSAMPLE_COLS,DOWNSAMPLE_ROWS),interpolation=cv2.INTER_AREA)
-    print(transformed_left)
-    
-
-    prev_frame = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
-
-    table_midpoint = 445
     horizontal_table_midpoint = 385
-
     bounces_this_point = []
     bounces = []
     points_metadata = []
-    rally_length = 0
     server = None
     receiver = None
     winner = None
@@ -906,12 +701,8 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
     serve_like_events = []
     possible_x_range = [0,DOWNSAMPLE_COLS]
     serve_bounce = None
-
     min_value ,max_saturation = None,None
 
-    #i think i have to rename the resized version, to avoid issues? also prev_frame is gray now
-    #frame = np.zeros_like(prev_frame)
-    
     full_res_frame = np.zeros(shape=(original_rows,original_cols,3),dtype=np.uint8)
     fgMask = np.zeros(shape=(DOWNSAMPLE_ROWS,DOWNSAMPLE_COLS),dtype=np.uint8)
     hsv = np.zeros(shape=(DOWNSAMPLE_ROWS,DOWNSAMPLE_COLS,3),dtype=np.uint8)
@@ -924,97 +715,38 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
         if frame_count % (fps*5) == 0 and progress_callback is not None:
             progress_callback(frame_count, nr_frames)
         
+
         frame_count += 1
-       
-        #time1 = time.time()
-       
         if frame_count % skip_rate != 0:
             ret = capture.grab()
             continue
         
 
-        ret, _ = capture.read(full_res_frame)
-        
-        #time2  =time.time()
-
-
+        ret, full_res_frame = capture.read()
+    
         # if not is_table_view(frame,table_mask):
         #     continue
         
-        #print(f"time to read:{time2-time1}s")
-
-        if frame_count == nr_frames:
+        if frame_count == nr_frames or full_res_frame is None:
             break
         
-        if full_res_frame is None:
-            break
-
-
-        
-        #game 4, complete set
-        # if frame_count<nr_frames*0.43:
-        #     continue
-        
-        # if frame_count < nr_frames*0.24:
-        #     continue
-
-        # game 1, complete set
-        # if frame_count<nr_frames*0.08:
-        #     continue
-        
-        # if frame_count>nr_frames*0.57:
-        #     break
-
-
-        #game 3, first set
-        # if frame_count>nr_frames*0.5:
-        #     break
-        
-        #game 3, second set
-        # if frame_count<nr_frames*0.5:
-        #     continue
-
-
-        # if frame_count<nr_frames*0.57:
-        #     continue
-        
-
-
-        
-
-        
-        
-
-        start_time = time.time()
         frame = cv2.resize(full_res_frame,(DOWNSAMPLE_COLS,DOWNSAMPLE_ROWS),interpolation=cv2.INTER_AREA)
         cv2.cvtColor(src=frame, dst=hsv, code=cv2.COLOR_BGR2LAB)
 
-        # frame = frame[0:original_rows, 0:int(original_cols//2)]
-        # frame = frame[0:original_rows, int(original_cols//2):original_cols]
-
-        #blur = cv2.GaussianBlur(frame, (3, 3), 1.5)
-        # blur = cv2.medianBlur(frame, 5)
-        #blur = cv2.GaussianBlur(frame, (5, 5), 1.5)
-        #blur = cv2.GaussianBlur(frame, (7, 7), 1.5)
-
-        blur = frame
-        #NOT SURE ABOUT THIS
-        backSub.apply(image=blur, fgmask=fgMask, learningRate =0.0005)
-        # fgMask = backSub.apply(blur)
-
+        backSub.apply(image=frame, fgmask=fgMask, learningRate = 0.0005)
         cv2.threshold(src=fgMask,dst=fgMask, thresh=130, maxval=255, type=cv2.THRESH_BINARY)
-
-        
-            
 
         if point_started:
             cv2.medianBlur(src=fgMask, dst=fgMask, ksize=5)
             # fgMask = remove_large_blobs(fgMask,max_area=last_high_conf_area*15)
-            
-        
             combined = fgMask
             # combined = apply_white_filter(frame, fgMask,min_value,max_saturation)
-
+            if frames_since_ball < FRAME_COUNT_TO_TRIGGER_RECOVERY:
+                ball_contour = get_ball_during_point(combined, hsv,ball_history, table_left_end, table_right_end,roi_topleft,roi_botright,toss_ball, predicted_positions,possible_x_range)  # noqa: F821
+            else:
+                print("RECOVERING")
+                ball_contour = recover_ball(combined, toss_ball, strict_table_quad,ball_history, hsv)  # noqa: F821
+            
         else:
             if min_value is None or frame_count%fps==0:
                 min_value, max_saturation = get_white_threshold(frame,fgMask) 
@@ -1023,33 +755,13 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
             # if len(serve_like_events)>0:
             #     fgMask = cv2.medianBlur(fgMask, 5)
             #     fgMask = remove_large_blobs(fgMask,max_area=last_high_conf_area*15)
-        
-       
-      
 
-        
-        if not point_started:
             ball_candidates, contours_inside_table = get_ball_candidates(combined, strict_table_quad, fgMask, serve_like_events, table_bottom)
             serve_candidates = update_serve_candidates(serve_candidates,ball_candidates,frame_count,strict_table_quad,serve_like_events,hsv, inner_left,inner_right,table_bottom,fps)
-        else:
-            if frames_since_ball < 5:
-                ball_contour = get_ball_during_point(combined, hsv,ball_history, table_left_end, table_right_end,roi_topleft,roi_botright,toss_ball, predicted_positions,possible_x_range)  # noqa: F821
-            else:
-                print("RECOVERING")
-                ball_contour = recover_ball(combined, toss_ball, strict_table_quad,ball_history, hsv)  # noqa: F821
 
-            # ball_contour = get_ball_during_point(combined, hsv,ball_history, table_left_end, table_right_end,roi_topleft,roi_botright,toss_ball, predicted_positions,possible_x_range)  # noqa: F821
-
-
-        # ball_contour = ball_candidates
-
-
-        
-        
         mistake = False
         if eval:
             was_fp = False
-            #evaluation
             try:
                 while eval_frame<frame_count:
                     eval_frame, ball_x, ball_y = get_next_data(dict_iter)
@@ -1068,11 +780,7 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
                         else:
                             fn += 1
                             mistake = True
-                            # if not display:
-                            #     cv2.namedWindow("Frame difference", cv2.WINDOW_NORMAL)
-                            #     cv2.resizeWindow("Frame difference", 800, 600)
-                            #     cv2.imshow('Frame difference', frame)
-                            #     key = cv2.waitKey(0) & 0xFF
+                           
                     else:
                         ball_pos = get_cnt_centroid(ball_contour)
                         if (ball_x,ball_y) != (-1,-1) and above_table and math.dist(true_pos,ball_pos) < 20:
@@ -1088,34 +796,13 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
 
         if point_started:
             if ball_contour is not None:
-                # start_time1 = time.time()
-                # print(f"COLOR:{get_cnt_color(ball_contour,hsv)}")
-                # end_time1 = time.time()
-                # print(f"time for color:{end_time1-start_time1}s")
-
-                # start_time1 = time.time()
-                print(f"COLOR2:{get_cnt_color2(ball_contour,hsv)}")
-                # end_time1 = time.time()
-                # print(f"time for color2:{end_time1-start_time1}s")
-                # print(f"median color:{get_cnt_median_color(ball_contour,hsv)}")
-
                 area = cv2.contourArea(ball_contour)
-                if last_high_conf_area is not None:
-                    print(f"area ratio: {area/last_high_conf_area}")
-                # print(f"area:{area}")
                 radius = math.sqrt(area / math.pi)
-                print(f"r:{radius}")
                 perimeter = cv2.arcLength(ball_contour, True)
                 circularity = 4 * math.pi * area / (perimeter ** 2)
-                print(f"circularity:{circularity}")
                 ball_pos = get_cnt_centroid(ball_contour)
-                print(f"ball pos:{ball_pos}")
-
-                
                 ball_color = get_cnt_color2(ball_contour,hsv)
-
                 ball_history.append(BallCandidate(radius,circularity,ball_pos, frame_count,ball_contour,ball_color,area))
-
                 velocity = tuple(np.subtract(ball_history[-1].position, ball_history[-2].position))
 
 
@@ -1123,11 +810,8 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
                     ball_history.popleft()
 
                 possible_x_range = get_possible_x_range(ball_history,server,midpoint1,midpoint2,table_left_end,table_right_end,frames_since_ball)
-                print(possible_x_range)
-                #predicted_positions = get_new_predicted_positions(frame_count,ball_history,server,transformed_left,transformed_right,table_length,skip_rate)
 
-                if is_bounce(ball_history,table_quad,skip_rate):
-                    print("BOUNCE")
+                if (frame_count - last_bounce_frame > 2*skip_rate) and is_bounce(ball_history,table_quad,skip_rate):
                     last_bounce_frame = frame_count
                     bounce_pos = get_cnt_bottom(ball_history[-2].contour)
                     bounce_side = point_side(midpoint2,midpoint1, bounce_pos)
@@ -1135,18 +819,10 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
                         cv2.circle(frame, bounce_pos, radius=2, color=(0, 255, 0), thickness=-1)
                         transformed_pos = cv2.perspectiveTransform(np.float32([bounce_pos]).reshape(-1,1,2),M)
                         processed_pos = process_bounce_pos(transformed_pos)
-
-                        # bounces_this_point.append(((int(transformed_pos[0][0][0]),int(transformed_pos[0][0][1])), frame_count))
                         bounces_this_point.append((processed_pos,frame_count))
-
-                        print(processed_pos)
-                        print(transformed_pos)
-                        print(transformed_pos[0][0])
-
+                      
                         if display:
-                            # cv2.circle(output, (int(transformed_pos[0][0][0]),int(transformed_pos[0][0][1])), radius=2, color=(0, 255, 0), thickness=-1)
                             cv2.circle(output, processed_pos, radius=2, color=(0, 255, 0), thickness=-1)
-
                             cv2.imshow("output",output)
                             cv2.waitKey(0)
                             cv2.destroyAllWindows()
@@ -1167,21 +843,21 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
             predicted_positions = get_new_predicted_positions(frame_count,ball_history,server,transformed_left,transformed_right,table_length,skip_rate)
 
             if is_point_over(frames_since_ball,last_bounce_frame,frame_count,fps,analysis_fps,bounces_this_point,ball_history):
-                print("point over")
                 point_started = False
+                frames_since_ball = 0
+                last_high_conf_area = 10
+                ball_history.clear()
                 if len(bounces_this_point)>0:
                     if bounces_this_point[-1][0][0]<horizontal_table_midpoint: #bounced on the left side for the last time
                         winner = "Right"
                     else:
                         winner = "Left"
 
-                    print("proper point, added to stats")
-
                     just_bounce_positions = [x[0] for x in bounces_this_point]
+                    print("added point to stats")
                     points_metadata.append(create_point(1,1,server,receiver,winner,point_start_frame,frame_count,just_bounce_positions,serve_bounce))
-                    print(points_metadata[-1])
                     bounces.append(bounces_this_point.copy())
-                
+
 
         else:
             point_starting, toss_ball, cnt_on_table =  point_is_starting(fgMask,strict_table_quad,serve_like_events,contours_inside_table,frame_count,fps,hsv, midpoint1, midpoint2)
@@ -1209,9 +885,6 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
                 ball_history.append(BallCandidate(1,1,ball_pos, frame_count,ball_contour,ball_color,area))
                 serve_candidates.clear()
 
-                #not clearing, old serve events just get removed constantly anyway
-                #serve_like_events.clear()
-
                 toss_pos = get_cnt_centroid(toss_ball.contour)
                 toss_area = toss_ball.area
 
@@ -1234,31 +907,6 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
                 print(f"HIGH CONF AREA: {toss_area}")
                 roi_topleft, roi_botright = get_roi_bounds(ball_pos, table_left_end, table_right_end, table_bottom)
                 
-                # cv2.drawContours(frame, ball_contour, -1, (0, 0, 255), 1)
-                # cv2.namedWindow("Frame difference", cv2.WINDOW_NORMAL)
-                # cv2.resizeWindow("Frame difference", 800, 600)
-                # cv2.imshow('Frame difference', frame)
-                # cv2.namedWindow("mask", cv2.WINDOW_NORMAL)
-                # cv2.resizeWindow("mask", 800, 600)
-                # cv2.imshow('mask', fgMask)
-                
-                # key = cv2.waitKey(0) & 0xFF
-                # if key == ord('q'):
-                #     break
-        
-
-
-
-        # if point_started and ball_contour is None:
-        #     ball_history.clear()
-
-
-        #if the ball hasn't been seen in 1s, the point should be over?
-        if frames_since_ball > analysis_fps:
-            #i don't we ever get here anymore, due to is_point_over
-            frames_since_ball = 0
-            last_high_conf_area = 10
-            ball_history.clear()
 
 
         if display: #or mistake:
@@ -1270,7 +918,6 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
                 cv2.rectangle(combined, roi_topleft,roi_botright, (0,255,0),3)
 
                 for pos in predicted_positions:
-                    # print(pos)
                     cv2.circle(frame, (int(pos[0]),int(pos[1])), radius=1, color=(255, 0, 255), thickness=2)
                 
             #     if eval:
@@ -1300,10 +947,6 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
     cv2.destroyAllWindows()
 
 
-
-    # print(points_metadata)
-    # stats.get_stats(points_metadata)
-
     if eval:
         precision = tp/(tp+fp)
         recall = tp/(tp+fn)
@@ -1316,30 +959,25 @@ def main(video_path, stop_event=None, metadata_queue = None, progress_callback =
         print("serve detection accuracy:")
         print(f"tp:{serve_tp}")
         print(f"fp:{serve_fp}")
-        overall_end = time.time()
-        print(f"processing time:{overall_end-overall_start}")
-        # stats.calculate(midpoint1,midpoint2,bounces)
     
     if metadata_queue is not None:
-        # print(points_metadata)
         metadata_queue.put(points_metadata)
+        print(points_metadata)
         if progress_callback is not None:
-            progress_callback(frame_count,nr_frames)
+            # progress_callback(frame_count,nr_frames)
+            progress_callback(1,1)
 
     return points_metadata
 
 if __name__ == '__main__':
-    # cProfile.run('main()', sort='cumtime')
     path = "openData/game_3.mp4"
-    # path = "myvideos/random.mkv"
     profiler = cProfile.Profile()
     profiler.enable()
-    asd1 = time.time()
+    time1 = time.time()
     meta = main(path,display=False,eval=True)
-    asd2 = time.time()
-    print(asd2-asd1)
+    time2 = time.time()
+    print(time2 - time1)
     profiler.disable()
     stats = pstats.Stats(profiler).sort_stats('cumtime')
     stats.print_stats(30)
-
     print(meta)

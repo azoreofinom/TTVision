@@ -46,17 +46,48 @@ class Stats:
         df["serve_length"] = df["serve_bounce"].apply(bucket_serves)
         self.df = df
     
+
+    def get_longest_win_streaks(self):
+        df_sorted = self.df.sort_values("frame_start")
+
+        winners = df_sorted["winner"].tolist()
+
+        streaks = {}
+        current_player = None
+        current_streak = 0
+
+        for w in winners:
+            if w == current_player:
+                current_streak += 1
+            else:
+                if current_player is not None:
+                    streaks[current_player] = max(
+                        streaks.get(current_player, 0), current_streak
+                    )
+                current_player = w
+                current_streak = 1
+
+        # last streak
+        if current_player is not None:
+            streaks[current_player] = max(
+                streaks.get(current_player, 0), current_streak
+            )
+
+        return streaks
+
+
     def get_summary_statistics(self):
         # Basic stats per player
         players = self.df["server"].unique()
 
         summary_stats = {}
 
-        
+        streaks = self.get_longest_win_streaks()
 
         for player in players:
             total_points_won = self.df[self.df["winner"] == player].shape[0]
             total_serves = self.df[self.df["server"] == player].shape[0]
+            total_opponent_serves = self.df[self.df["server"] != player].shape[0]
             points_won_on_serve = self.df[
                 (self.df["server"] == player) & (self.df["winner"] == player)
             ].shape[0]
@@ -72,7 +103,9 @@ class Stats:
                 "Points Won": total_points_won,
                 "Points won on own serve": points_won_on_serve,
                 "Points won on opponent serve": points_won_on_opponent_serve,
-                "Serve Win %": points_won_on_serve / total_serves
+                "Most consecutive won":streaks[player],
+                "Receive Win %": points_won_on_opponent_serve / total_opponent_serves * 100,
+                "Serve Win %": points_won_on_serve / total_serves * 100
                 if total_serves > 0
                 else 0,
                 "Avg Rally Length (Win)": rally_lengths.mean()
