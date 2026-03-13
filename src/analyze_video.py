@@ -2,9 +2,6 @@ import collections
 import heapq
 import json
 import math
-import time
-import cProfile
-import pstats
 
 import cv2
 import numpy as np
@@ -969,15 +966,3 @@ def main(video_path, stop_event=None, metadata_queue = None, warning_queue = Non
 
     return points_metadata
 
-if __name__ == '__main__':
-    path = "openData/game_3.mp4"
-    profiler = cProfile.Profile()
-    profiler.enable()
-    time1 = time.time()
-    meta = main(path,display=False,eval=True)
-    time2 = time.time()
-    print(time2 - time1)
-    profiler.disable()
-    stats = pstats.Stats(profiler).sort_stats('cumtime')
-    stats.print_stats(30)
-    print(meta)

@@ -68,7 +68,7 @@ def merge_intervals(intervals):
 
 
 
-def run_ffmpeg_with_progress(cmd, total_duration_sec, progress_callback, total_frames, fps):
+def run_ffmpeg_with_progress(cmd, total_duration_sec, progress_callback, total_frames, fps, stop_event = None):
     """Run ffmpeg and parse progress output."""
     
     # Insert progress flags after 'ffmpeg'
@@ -82,6 +82,19 @@ def run_ffmpeg_with_progress(cmd, total_duration_sec, progress_callback, total_f
     )
     
     for line in process.stdout:
+        if stop_event is not None and stop_event.is_set():
+            print("Encoding cancelled!")
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            
+            if os.path.exists(cmd[-1]):
+                print("Removed partially encoded video")
+                os.remove(cmd[-1])
+            return False
+
         line = line.strip()
         if line.startswith("out_time_ms="):
             try:
@@ -97,6 +110,7 @@ def run_ffmpeg_with_progress(cmd, total_duration_sec, progress_callback, total_f
                 pass
     
     process.wait()
+    return True
 
 
 
@@ -313,10 +327,10 @@ def remove_low_overlap_segments(
    
     cmd = build_command(video_path,intervals_sec, preset, output_path)
 
-    run_ffmpeg_with_progress(cmd, total_frames / fps, progress_callback, total_frames, fps)
-    if progress_callback:
+    finished = run_ffmpeg_with_progress(cmd, total_frames / fps, progress_callback, total_frames, fps, stop_event)
+    if finished and progress_callback:
         progress_callback(1,1)
-    print(f"Edited video saved to: {output_path}")
+        print(f"Edited video saved to: {output_path}")
 
 
 def parse_args():

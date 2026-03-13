@@ -33,7 +33,7 @@ class StatsGUI:
     def __init__(self, root, default_image_path="example_image.jpg"):
         self.video_path = None
         self.root = root
-        self.root.title("TTApp")
+        self.root.title("TTVision")
         self.root.geometry("1200x800")
 
         self.stop_event = None

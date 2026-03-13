@@ -1,6 +1,6 @@
-# TTApp
+# TTVision
 
-TTApp is a tool for analyzing and editing table tennis matches from video recordings. 
+TTVision is a tool for analyzing and editing table tennis matches from video recordings. 
 
 ![Screenshot](assets/Screenshot.png)
 
@@ -8,7 +8,7 @@ TTApp is a tool for analyzing and editing table tennis matches from video record
 
 ## Overview
 
-TTApp provides two primary capabilities:
+TTVision provides two primary capabilities:
 
 * **Analysis** – Extracts statistics and winning bounce positions from table tennis games.
 * **Editing** – Automatically edits out dead time from videos, leaving only playing time. 
@@ -64,7 +64,7 @@ FFmpeg must be available in your system PATH or accessible by the application, a
 
 ## Limitations
 
-TTApp may fail or produce unreliable results when:
+TTVision may fail or produce unreliable results when:
 * The camera moves after the setup period
 * Table surface is not visible
 * Players or objects block the table
