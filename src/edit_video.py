@@ -16,7 +16,7 @@ GRACE_AFTER = 0.2
 INIT_SEG_FPS = 5                 # run segmentation at 5 fps
 STABILITY_IOU_THRESHOLD = 0.95   # masks almost identical
 STABILITY_DURATION_SEC = 0.5     # must be stable for 0.5 seconds
-INIT_TIMEOUT_SEC = 20            # max time allowed for init
+INIT_TIMEOUT_SEC = 30            # max time allowed for init
 
 PIXEL_COUNT_THRESHOLD = 2
 IOU_THRESHOLD = 0.0001

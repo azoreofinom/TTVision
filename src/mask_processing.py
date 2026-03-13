@@ -306,7 +306,8 @@ def order_quad_points(points):
 
 def load_model():
     basedir = os.path.dirname(__file__)
-    model_path = os.path.join(basedir, "weights/table_segmentation.ckpt")
+    project_root = os.path.abspath(os.path.join(basedir, ".."))
+    model_path = os.path.join(project_root, "weights", "table_segmentation.ckpt")
     print(model_path)
    
     model = TableSegmenter.load_from_checkpoint(model_path, loss="DICE")

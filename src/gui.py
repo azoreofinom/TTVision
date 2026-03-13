@@ -330,8 +330,12 @@ class StatsGUI:
 if __name__ == "__main__":
     root = tk.Tk()
     sv_ttk.set_theme("dark")
+
     basedir = os.path.dirname(__file__)
-    app = StatsGUI(root, default_image_path=os.path.join(basedir, "images/output_table_horizontal.png")) 
+    project_root = os.path.abspath(os.path.join(basedir, ".."))
+
+    # app = StatsGUI(root, default_image_path=os.path.join(basedir, "images/output_table_horizontal.png")) 
+    app = StatsGUI(root, default_image_path=os.path.join(project_root, "images", "output_table_horizontal.png"))
     if sys.platform.startswith("win"):
         apply_theme_to_titlebar(root)
     

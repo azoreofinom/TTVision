@@ -52,6 +52,8 @@ FFmpeg must be available in your system PATH or accessible by the application.
 
 ---
 
+python edit_video.py "path\to\video" --preset fast
+
 ## Recording Setup
 
 TTApp assumes a consistent recording environment. Follow these guidelines when recording footage.
@@ -127,24 +129,12 @@ These conditions are required for reliable segmentation and detection.
 ---
 
 
-## Workflow
-
-Typical workflow using TTApp:
-
-1. **Record match footage** using the recommended camera setup.
-2. **Allow a 20s setup period** at the start of the recording.
-3. **Encode the video with FFmpeg** if necessary.
-4. **Run the editing pipeline** to detect the table and prepare the video.
-5. **Run the analysis pipeline** to extract rally information.
-
----
-
 ## Limitations
 
 TTApp may fail or produce unreliable results when:
 
 * The camera moves after the setup period
-* Table lines are not visible
+* Table surface is not visible
 * Players or objects block the table
 * Multiple balls appear in the frame
 * The table color blends with the environment
