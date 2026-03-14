@@ -6,6 +6,7 @@ import subprocess
 import json
 import mask_processing
 import argparse
+import shutil
 
 DOWNSAMPLE_ROWS = 320
 DOWNSAMPLE_COLS = 640
@@ -21,6 +22,10 @@ INIT_TIMEOUT_SEC = 30            # max time allowed for init
 PIXEL_COUNT_THRESHOLD = 2
 IOU_THRESHOLD = 0.0001
 SECONDS_TO_TRIGGER = 1.5
+
+def ffmpeg_installed():
+    return shutil.which("ffmpeg") is not None
+
 
 def has_audio_stream(video_path):
     cmd = [
@@ -72,20 +77,19 @@ def run_ffmpeg_with_progress(cmd, total_duration_sec, progress_callback, total_f
     """Run ffmpeg and parse progress output."""
     
     # Insert progress flags after 'ffmpeg'
-    progress_cmd = [cmd[0], "-progress", "pipe:1", "-nostats"] + cmd[1:]
+    progress_cmd = [cmd[0], "-loglevel", "fatal","-progress", "pipe:1", "-nostats"] + cmd[1:]
     
-    startupinfo = subprocess.STARTUPINFO()
-    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    # startupinfo = subprocess.STARTUPINFO()
+    # startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
     process = subprocess.Popen(
         progress_cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        startupinfo=startupinfo,
+        # startupinfo=startupinfo,
         creationflags=subprocess.CREATE_NO_WINDOW
     )
-    
     for line in process.stdout:
         if stop_event is not None and stop_event.is_set():
             print("Encoding cancelled!")
@@ -115,6 +119,7 @@ def run_ffmpeg_with_progress(cmd, total_duration_sec, progress_callback, total_f
                 pass
     
     process.wait()
+
     return_code = process.returncode
 
     if return_code != 0:
@@ -210,7 +215,14 @@ def remove_low_overlap_segments(
         display=False,
         ):
 
-    
+    if not ffmpeg_installed():
+        error_msg = "FFmpeg was not found on your system. Please make sure it is installed and listed in the system PATH."
+        print(error_msg)
+        if warning_queue:
+            warning_queue.put(error_msg)
+        return
+
+
     base_name = os.path.splitext(os.path.basename(video_path))[0]
     output_path = f"{base_name}_edited.mp4"
     
@@ -255,7 +267,6 @@ def remove_low_overlap_segments(
     while True:
         if stop_event is not None and stop_event.is_set():
             print("Task cancelled!")
-            #is this right? 
             return
 
         if frame_idx % progress_interval == 0: 
@@ -349,7 +360,6 @@ def remove_low_overlap_segments(
     total_frames = sum(round((end - start) * fps) for start, end in intervals_sec)
    
     cmd = build_command(video_path,intervals_sec, preset, output_path)
-
     finished = run_ffmpeg_with_progress(cmd, total_frames / fps, progress_callback, total_frames, fps, stop_event, warning_queue)
     if finished and progress_callback:
         progress_callback(1,1)

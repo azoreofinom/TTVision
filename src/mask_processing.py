@@ -20,9 +20,11 @@ STABILITY_IOU_THRESHOLD = 0.95   # masks almost identical
 STABILITY_DURATION_SEC = 0.5     # must be stable for 0.5 seconds
 INIT_TIMEOUT_SEC = 30  
 
+
 def color_distance(c1: np.ndarray, c2: np.ndarray) -> float:
     """Euclidean distance in RGB space."""
     return float(np.sqrt(np.sum((c1.astype(float) - c2.astype(float)) ** 2)))
+
 
 def get_most_common_color_in_mask_lab(lab_image, mask, k=2, random_state=42):
     """

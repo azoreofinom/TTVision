@@ -8,3 +8,4 @@ This document lists potential ideas for improvements and features.
 - [ ] Export stats
 - [ ] Detect players switching sides
 - [ ] Pose estimation -> Stroke classification
+- [ ] Make analysis work with WTT-style videos (editing, zoom-out, slowly moving camera)
