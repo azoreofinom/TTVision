@@ -14,7 +14,7 @@ TTVision provides two primary capabilities:
 
 
 
-If you are using Windows and have installed FFmpeg, you can simply run the application after downloading it from the releases tab.
+If you are using Windows and have installed FFmpeg, you can simply run the application after downloading it from the releases tab. Make sure to place the executable in a folder where administrator permissions are not required, as that's where TTVision will attempt to save the edited video.
 
 If you only wish to edit videos and want to do so from the terminal, you can run the following commands:
 
@@ -87,3 +87,12 @@ Potential future features include:
 * Support for additional camera angles
 * Support for matches where players switch sides
 * Stroke-based stats, such as % of points won using backhand flick
+
+## Acknowledgements
+
+juicy_fish on Flaticon for the desktop icon: https://www.flaticon.com/authors/juicy-fish
+
+This project uses segmentation weights derived from
+the TT3D project by the Cognitive Systems Group at the University of Tübingen:
+
+https://github.com/cogsys-tuebingen/tt3d
