@@ -88,6 +88,9 @@ Potential future features include:
 * Support for additional camera angles
 * Support for matches where players switch sides
 * Stroke-based stats, such as % of points won using backhand flick
+* Make certain parameters, such as grace periods and initialization timeout tunable from the GUI
+* Export stats feature
+* Make analysis work with WTT-style videos (editing, zoom-out, slowly moving camera)
 
 ## Acknowledgements
 
