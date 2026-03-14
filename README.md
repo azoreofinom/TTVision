@@ -45,6 +45,7 @@ FFmpeg must be available in your system PATH or accessible by the application, a
 ## General recording assumptions
 
 * The camera is **static after the 30 second initialization phase.** If the camera or the table is moved after that, it will lead to **analysis and editing mistakes**
+* There is a single table in frame
 * **The surface of the table is visible**
 
 
