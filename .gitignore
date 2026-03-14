@@ -11,9 +11,13 @@ detection_and_tracking_methods/
 gray_frames/
 myvideos/
 openData/
-images/
+# images/
 old/
 distwithissues/
+.vscode/
+ttenv/
+dist/
+exes/
 
 #files to ignore for now
 /CSRT_tracker_on_back_sub.py

@@ -332,10 +332,13 @@ if __name__ == "__main__":
     sv_ttk.set_theme("dark")
 
     basedir = os.path.dirname(__file__)
-    project_root = os.path.abspath(os.path.join(basedir, ".."))
-
-    # app = StatsGUI(root, default_image_path=os.path.join(basedir, "images/output_table_horizontal.png")) 
-    app = StatsGUI(root, default_image_path=os.path.join(project_root, "images", "output_table_horizontal.png"))
+    if hasattr(sys, "_MEIPASS"):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.abspath(os.path.join(basedir, ".."))
+    
+    table_image_path = "images/output_table_horizontal.png"
+    app = StatsGUI(root, default_image_path=os.path.join(base_path, table_image_path))
     if sys.platform.startswith("win"):
         apply_theme_to_titlebar(root)
     

@@ -7,6 +7,7 @@ import torch
 from table_segmenter import TableSegmenter
 import os
 from PIL import Image
+import sys
 
 DOWNSAMPLE_ROWS = 320
 DOWNSAMPLE_COLS = 640
@@ -306,10 +307,12 @@ def order_quad_points(points):
 
 def load_model():
     basedir = os.path.dirname(__file__)
-    project_root = os.path.abspath(os.path.join(basedir, ".."))
-    model_path = os.path.join(project_root, "weights", "table_segmentation.ckpt")
-    print(model_path)
-   
+    if hasattr(sys, "_MEIPASS"):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.abspath(os.path.join(basedir, ".."))
+    path = "weights/table_segmentation.ckpt"
+    model_path = os.path.join(base_path, path)
     model = TableSegmenter.load_from_checkpoint(model_path, loss="DICE")
     
     # Ensure model is on GPU

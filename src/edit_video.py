@@ -32,7 +32,7 @@ def has_audio_stream(video_path):
         video_path
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
     data = json.loads(result.stdout)
 
     return "streams" in data and len(data["streams"]) > 0
@@ -74,11 +74,16 @@ def run_ffmpeg_with_progress(cmd, total_duration_sec, progress_callback, total_f
     # Insert progress flags after 'ffmpeg'
     progress_cmd = [cmd[0], "-progress", "pipe:1", "-nostats"] + cmd[1:]
     
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
     process = subprocess.Popen(
         progress_cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
-        text=True
+        text=True,
+        startupinfo=startupinfo,
+        creationflags=subprocess.CREATE_NO_WINDOW
     )
     
     for line in process.stdout:
