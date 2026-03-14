@@ -68,7 +68,7 @@ def merge_intervals(intervals):
 
 
 
-def run_ffmpeg_with_progress(cmd, total_duration_sec, progress_callback, total_frames, fps, stop_event = None):
+def run_ffmpeg_with_progress(cmd, total_duration_sec, progress_callback, total_frames, fps, stop_event = None, warning_queue = None):
     """Run ffmpeg and parse progress output."""
     
     # Insert progress flags after 'ffmpeg'
@@ -80,7 +80,7 @@ def run_ffmpeg_with_progress(cmd, total_duration_sec, progress_callback, total_f
     process = subprocess.Popen(
         progress_cmd,
         stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
         text=True,
         startupinfo=startupinfo,
         creationflags=subprocess.CREATE_NO_WINDOW
@@ -115,6 +115,24 @@ def run_ffmpeg_with_progress(cmd, total_duration_sec, progress_callback, total_f
                 pass
     
     process.wait()
+    return_code = process.returncode
+
+    if return_code != 0:
+        error_output = process.stderr.read()
+        print("FFmpeg failed with return code:", return_code)
+        print(error_output)
+        if warning_queue:
+            warning_queue.put(error_output)
+        return False
+
+    output_file = cmd[-1]
+    if not os.path.exists(output_file):
+        msg = "FFmpeg finished but output file was not created!"
+        print(msg)
+        if warning_queue:
+            warning_queue.put(msg)
+        return False
+
     return True
 
 
@@ -332,7 +350,7 @@ def remove_low_overlap_segments(
    
     cmd = build_command(video_path,intervals_sec, preset, output_path)
 
-    finished = run_ffmpeg_with_progress(cmd, total_frames / fps, progress_callback, total_frames, fps, stop_event)
+    finished = run_ffmpeg_with_progress(cmd, total_frames / fps, progress_callback, total_frames, fps, stop_event, warning_queue)
     if finished and progress_callback:
         progress_callback(1,1)
         print(f"Edited video saved to: {output_path}")
