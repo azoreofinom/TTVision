@@ -4,7 +4,6 @@ TTVision is a tool for analyzing and editing table tennis matches from video rec
 
 ![Screenshot](assets/Screenshot.png)
 
----
 
 ## Overview
 
@@ -15,8 +14,13 @@ TTVision provides two primary capabilities:
 
 
 
-You can simply run the application after downloading it from the releases tab.
-If you only wish to edit videos and want to do so from the terminal, you can run the following command:
+If you are using Windows and have installed FFmpeg, you can simply run the application after downloading it from the releases tab.
+
+If you only wish to edit videos and want to do so from the terminal, you can run the following commands:
+
+```
+pip install -r requirements.txt
+```
 
 ```
 python edit_video.py "path\to\video" --preset your_preset_choice
@@ -26,17 +30,17 @@ The available preset options can be found at: https://trac.ffmpeg.org/wiki/Encod
 
 Because the system relies on visual detection of the table and ball, **camera placement and recording conditions are critical** for reliable results. Take a look at the "assumptions" section below. 
 
----
 
 ## Requirements
 
 * **FFmpeg** (required for video processing)
   https://ffmpeg.org/download.html
 
+Installation instructions are also available at: https://github.com/oop7/ffmpeg-install-guide
+
 
 FFmpeg must be available in your system PATH or accessible by the application, as it is needed for video editing.
 
----
 
 ## General recording assumptions
 
@@ -60,7 +64,7 @@ FFmpeg must be available in your system PATH or accessible by the application, a
 * **Minimal glare on the table surface**
 * **Table contrasts clearly with the background**
 
----
+
 
 ## Limitations
 
@@ -74,7 +78,7 @@ TTVision may fail or produce unreliable results when:
 
 During analysis, let points or players tossing the ball across the table might be counted as points, which is why more points might be found than what were actually played.
 
----
+
 
 ## Future Improvements
 

@@ -5,11 +5,8 @@ from albumentations.pytorch import ToTensorV2
 from PIL import Image
 
 
-
 def tensor2array(tensor):
     return tensor.detach().cpu().numpy()
-
-
 
 # Converts the image from PIL to tensor of the right size
 # Takes as input a list of pil_images
@@ -29,11 +26,6 @@ def postprocess(t_masks, sizes):
     for i in range(num_masks):
         mask = tensor2array(t_masks[i].squeeze())
         mask = 255 * mask
-
-        # resized_mask = cv2.resize(
-        #     mask, (sizes[i][1], sizes[i][0]), interpolation=cv2.INTER_NEAREST
-        # )
-        # print(resized_mask.shape)
         resized_masks.append(mask)
 
     return resized_masks

@@ -56,15 +56,8 @@ def get_most_common_color_in_mask_lab(lab_image, mask, k=2, random_state=42):
     unique, counts = np.unique(labels, return_counts=True)
     dominant_cluster = unique[np.argmax(counts)]
 
-
-
     dominant_lab_cv = kmeans.cluster_centers_[dominant_cluster]
     
-    # Convert to uint8 format
-    # dominant_lab_cv_uint8 = np.clip(dominant_lab_cv, 0, 255).astype(np.uint8)
-    # print(f"uint8:{dominant_lab_cv_uint8}")
-    # # Convert to true CIE Lab
-    # dominant_lab_cie = opencv_lab_to_cielab(dominant_lab_cv_uint8)
     return dominant_lab_cv
 
 def remove_large_blobs(mask, max_area=150, kernel_size=10):
@@ -223,9 +216,6 @@ def get_mask_corners_robust(mask: np.ndarray):
     hull = cv2.convexHull(contour)
 
 
-    # epsilon = 0.05 * cv2.arcLength(hull, True)
-    # approx = cv2.approxPolyDP(hull, epsilon, True)
-
     # Polygon approximation
     approx = cv2.approxPolyN(hull, nsides=4)
     pts = approx.reshape(-1, 2)
@@ -245,21 +235,6 @@ def get_mask_corners_robust(mask: np.ndarray):
     # draw approx points
     for p in pts:
         cv2.circle(vis, tuple(p), 5, (0, 255, 255), -1)
-
-    # cv2.imshow("contour / hull / approx", vis)
-    # cv2.waitKey(0)
-    # -----------------------
-
-    # If more than 4 points, fallback to bounding rect corners
-    # if len(pts) != 4:
-    #     x, y, w, h = cv2.boundingRect(hull)
-    #     pts = np.array([
-    #         [x, y],
-    #         [x + w, y],
-    #         [x + w, y + h],
-    #         [x, y + h]
-    #     ])
-
 
     return pts
 
@@ -411,16 +386,6 @@ def compute_stable_segmentation_mask(cap, fps, stop_event):
                 color=(0, 0, 255)
                 for (x, y) in corners:
                     cv2.circle(downsampled_lab, (int(x), int(y)), 5, color, -1)
-
-                # cv2.imshow("current",current_mask)
-                # cv2.imshow("expanded",expanded)
-                # cv2.imshow("image",downsampled_lab)
-                # cv2.imshow("final", final_mask)
-                # cv2.waitKey(0)
-                # cv2.destroyAllWindows()
-
-                
-
 
                 return final_mask, corners, frame_idx
 

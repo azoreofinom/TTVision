@@ -79,15 +79,12 @@ def run_ffmpeg_with_progress(cmd, total_duration_sec, progress_callback, total_f
     # Insert progress flags after 'ffmpeg'
     progress_cmd = [cmd[0], "-loglevel", "fatal","-progress", "pipe:1", "-nostats"] + cmd[1:]
     
-    # startupinfo = subprocess.STARTUPINFO()
-    # startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
     process = subprocess.Popen(
         progress_cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        # startupinfo=startupinfo,
         creationflags=subprocess.CREATE_NO_WINDOW
     )
     for line in process.stdout:
@@ -181,11 +178,7 @@ def build_command(video_path, intervals_sec, preset, output_path):
     if audio_exists:
         cmd += ["-map", "[outa]"]
 
-    # cmd += [
-    #     "-preset", preset,
-    #     output_path
-    # ]
-
+   
 
     # for win media player compatibility
     cmd += [
