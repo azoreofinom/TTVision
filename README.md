@@ -16,14 +16,22 @@ TTVision provides two primary capabilities:
 
 If you are using Windows and have installed FFmpeg, you can simply run the application after downloading it from the releases tab. Make sure to place the executable in a folder where administrator permissions are not required, as that's where TTVision will attempt to save the edited video.
 
-If you only wish to edit videos and want to do so from the terminal, you can run the following commands:
+To run from source, install [uv](https://docs.astral.sh/uv/) and sync the project once:
 
 ```
-pip install -r requirements.txt
+uv sync
 ```
 
+Launch the GUI:
+
 ```
-python edit_video.py "path\to\video" --preset your_preset_choice
+uv run python src/TTVision.py
+```
+
+Or edit videos from the terminal:
+
+```
+uv run python src/edit_video.py "path\to\video" --preset your_preset_choice
 ```
 
 The available preset options can be found at: https://trac.ffmpeg.org/wiki/Encode/H.264

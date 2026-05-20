@@ -9,25 +9,27 @@ import queue
 import stats
 import edit_video
 import sys
-import pywinstyles
 
-def apply_theme_to_titlebar(root):
-    version = sys.getwindowsversion()
+if sys.platform == "win32":
+    import pywinstyles
 
-    if version.major == 10 and version.build >= 22000:
-        # Windows 11 – change only titlebar color
-        pywinstyles.change_header_color(
-            root,
-            "#1c1c1c" if sv_ttk.get_theme() == "dark" else "#fafafa"
-        )
+    def apply_theme_to_titlebar(root):
+        version = sys.getwindowsversion()
 
-    elif version.major == 10:
-        # Windows 10 – enable dark titlebar without touching widget styling
-        pywinstyles.change_header_color(root, "#1c1c1c")
+        if version.major == 10 and version.build >= 22000:
+            # Windows 11 – change only titlebar color
+            pywinstyles.change_header_color(
+                root,
+                "#1c1c1c" if sv_ttk.get_theme() == "dark" else "#fafafa"
+            )
 
-        # force refresh of titlebar
-        root.wm_attributes("-alpha", 0.99)
-        root.wm_attributes("-alpha", 1)
+        elif version.major == 10:
+            # Windows 10 – enable dark titlebar without touching widget styling
+            pywinstyles.change_header_color(root, "#1c1c1c")
+
+            # force refresh of titlebar
+            root.wm_attributes("-alpha", 0.99)
+            root.wm_attributes("-alpha", 1)
 
 class StatsGUI:
     def __init__(self, root, default_image_path="example_image.jpg"):
