@@ -1,14 +1,21 @@
 albumentations==2.0.8
 lightning==2.3.3
-opencv_contrib_python==4.11.0.86
-opencv_python==4.11.0.86
-opencv_python_headless==4.11.0.86
-pandas==2.0.3
+
+opencv-python==5.0.0.93
+opencv-contrib-python==5.0.0.93
+
+
+pandas==2.2.3
+scipy==1.17.1
 Pillow==12.1.1
 pywinstyles==1.8
-scikit_learn==1.8.0
+pyvidplayer2==0.9.36
+scikit_learn==1.7.2
 segmentation_models_pytorch==0.3.3
 Shapely==2.1.2
 sv_ttk==2.6.1
 torch==2.4.1
-numpy==1.24.4
+
+# Important
+numpy==2.0.2
+matplotlib>=3.9
