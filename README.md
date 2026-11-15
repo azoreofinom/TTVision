@@ -19,7 +19,7 @@ If you are using Windows and have installed FFmpeg, you can simply run the appli
 If you only wish to edit videos and want to do so from the terminal, you can run the following commands:
 
 ```
-pip install -r requirements.txt
+python -m pip install --require-hashes --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
 ```
 
 ```
@@ -32,6 +32,11 @@ Because the system relies on visual detection of the table and ball, **camera pl
 
 
 ## Requirements
+
+For building self-contained Windows, macOS, and Linux packages, see
+[the build guide](docs/BUILDING.md). These builds include FFmpeg and FFprobe;
+users do not need a separate installation. Existing older releases described
+above still require system FFmpeg.
 
 * **FFmpeg** (required for video processing)
   https://ffmpeg.org/download.html

@@ -1,7 +1,6 @@
-import albumentations as A
+import cv2
 import numpy as np
 import torch
-from albumentations.pytorch import ToTensorV2
 from PIL import Image
 
 
@@ -10,13 +9,13 @@ def tensor2array(tensor):
 
 # Converts the image from PIL to tensor of the right size
 # Takes as input a list of pil_images
-def preprocess(pil_imgs, size=(640, 320), device="cuda:0"):
-    transform = A.Compose([A.Resize(height=size[1], width=size[0]), ToTensorV2()])
+def preprocess(pil_imgs, size=(640, 320), device="cpu"):
     resized_tensors = []
     for img in pil_imgs:
         img_array = np.array(img)
-        transformed = transform(image=img_array)
-        resized_tensors.append(transformed["image"][None].to(device))
+        resized = cv2.resize(img_array, size, interpolation=cv2.INTER_LINEAR)
+        tensor = torch.from_numpy(resized.transpose(2, 0, 1))
+        resized_tensors.append(tensor[None].to(device))
     return torch.cat(resized_tensors)
 
 

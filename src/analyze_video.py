@@ -8,6 +8,7 @@ import numpy as np
 import shapely
 
 import mask_processing
+from app_paths import resource_path
 
 
 class BallCandidate:
@@ -559,7 +560,7 @@ def process_bounce_pos(bounce_pos):
 def main(video_path, stop_event=None, metadata_queue = None, warning_queue = None, progress_callback = None, display=False, eval = False):
     capture = cv2.VideoCapture(video_path)
 
-    output = cv2.imread('images/output_table_horizontal.png')
+    output = cv2.imread(str(resource_path('images/output_table_horizontal.png')))
     fps = capture.get(cv2.CAP_PROP_FPS)
 
     if eval:

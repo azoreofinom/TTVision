@@ -9,9 +9,14 @@ import queue
 import stats
 import edit_video
 import sys
-import pywinstyles
+from app_paths import resource_path
+
+if sys.platform == "win32":
+    import pywinstyles
 
 def apply_theme_to_titlebar(root):
+    if sys.platform != "win32":
+        return
     version = sys.getwindowsversion()
 
     if version.major == 10 and version.build >= 22000:
@@ -251,10 +256,22 @@ class StatsGUI:
     def edit_video(self):
         print("Editing video...")
         if self.video_path:
+            output_path = filedialog.asksaveasfilename(
+                title="Save edited video",
+                initialfile=os.path.splitext(os.path.basename(self.video_path))[0] + "_edited.mp4",
+                defaultextension=".mp4",
+                filetypes=[("MP4 video", "*.mp4")],
+            )
+            if not output_path:
+                return
+            if os.path.normcase(os.path.realpath(output_path)) == os.path.normcase(os.path.realpath(self.video_path)):
+                messagebox.showerror("Invalid output", "Choose a different file from the input video.")
+                return
             self.stop_event = threading.Event()
             self.worker_thread = threading.Thread(
                 target=edit_video.remove_low_overlap_segments,
                 args=(self.video_path, self.stop_event, self.progress_callback, self.ffmpeg_preset.get(), self.warning_queue),
+                kwargs={"output_path": output_path},
                 daemon=True
             )
             self.worker_thread.start()
@@ -328,17 +345,24 @@ class StatsGUI:
    
 
 if __name__ == "__main__":
+    # Windowed executables have no console streams on Windows.
+    if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
+        from contextlib import redirect_stdout, redirect_stderr
+        from installation_check import main as check_installation
+        import traceback
+        with open(sys.argv[2], "w", encoding="utf-8") as report:
+            with redirect_stdout(report), redirect_stderr(report):
+                try:
+                    check_installation()
+                except Exception:
+                    traceback.print_exc()
+                    sys.exit(1)
+        sys.exit(0)
+
     root = tk.Tk()
     sv_ttk.set_theme("dark")
 
-    basedir = os.path.dirname(__file__)
-    if hasattr(sys, "_MEIPASS"):
-        base_path = sys._MEIPASS
-    else:
-        base_path = os.path.abspath(os.path.join(basedir, ".."))
-    
-    table_image_path = "images/output_table_horizontal.png"
-    app = StatsGUI(root, default_image_path=os.path.join(base_path, table_image_path))
+    app = StatsGUI(root, default_image_path=resource_path("images/output_table_horizontal.png"))
     if sys.platform.startswith("win"):
         apply_theme_to_titlebar(root)
     

@@ -6,7 +6,8 @@ import subprocess
 import json
 import mask_processing
 import argparse
-import shutil
+from pathlib import Path
+from app_paths import media_tool, subprocess_options
 
 DOWNSAMPLE_ROWS = 320
 DOWNSAMPLE_COLS = 640
@@ -24,12 +25,17 @@ IOU_THRESHOLD = 0.0001
 SECONDS_TO_TRIGGER = 1.5
 
 def ffmpeg_installed():
-    return shutil.which("ffmpeg") is not None
+    try:
+        media_tool("ffmpeg")
+        media_tool("ffprobe")
+        return True
+    except FileNotFoundError:
+        return False
 
 
 def has_audio_stream(video_path):
     cmd = [
-        "ffprobe",
+        media_tool("ffprobe"),
         "-v", "error",
         "-select_streams", "a",
         "-show_entries", "stream=index",
@@ -37,7 +43,7 @@ def has_audio_stream(video_path):
         video_path
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True, **subprocess_options())
     data = json.loads(result.stdout)
 
     return "streams" in data and len(data["streams"]) > 0
@@ -85,7 +91,7 @@ def run_ffmpeg_with_progress(cmd, total_duration_sec, progress_callback, total_f
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        creationflags=subprocess.CREATE_NO_WINDOW
+        **subprocess_options()
     )
     for line in process.stdout:
         if stop_event is not None and stop_event.is_set():
@@ -168,7 +174,7 @@ def build_command(video_path, intervals_sec, preset, output_path):
         filter_complex += f"concat=n={len(intervals_sec)}:v=1[outv]"
 
     cmd = [
-        "ffmpeg",
+        media_tool("ffmpeg"),
         "-y",
         "-i", video_path,
         "-filter_complex", filter_complex,
@@ -206,18 +212,22 @@ def remove_low_overlap_segments(
         preset="fast",
         warning_queue =None,
         display=False,
+        output_path=None,
         ):
 
     if not ffmpeg_installed():
-        error_msg = "FFmpeg was not found on your system. Please make sure it is installed and listed in the system PATH."
+        error_msg = "FFmpeg or FFprobe is missing. Reinstall TTVision. For source runs, run scripts/fetch_ffmpeg.py."
         print(error_msg)
         if warning_queue:
             warning_queue.put(error_msg)
         return
 
 
-    base_name = os.path.splitext(os.path.basename(video_path))[0]
-    output_path = f"{base_name}_edited.mp4"
+    source = Path(video_path).resolve()
+    output_path = Path(output_path).resolve() if output_path else source.with_name(source.stem + "_edited.mp4")
+    if os.path.normcase(str(source)) == os.path.normcase(str(output_path)):
+        raise ValueError("Output must be different from the input video")
+    output_path = str(output_path)
     
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -369,6 +379,10 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--output", help="Destination MP4 (default: beside the input video)"
+    )
+
+    parser.add_argument(
         "--display",
         action="store_true",
         help="Show debug visualization"
@@ -389,5 +403,6 @@ if __name__ == '__main__':
     remove_low_overlap_segments(
         args.video_path,
         display=args.display,
-        preset=args.preset
+        preset=args.preset,
+        output_path=args.output,
     )

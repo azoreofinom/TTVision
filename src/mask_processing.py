@@ -5,9 +5,8 @@ from collections import deque
 from utils import postprocess, preprocess
 import torch
 from table_segmenter import TableSegmenter
-import os
+from app_paths import resource_path
 from PIL import Image
-import sys
 
 DOWNSAMPLE_ROWS = 320
 DOWNSAMPLE_COLS = 640
@@ -283,18 +282,12 @@ def order_quad_points(points):
 
 
 def load_model():
-    basedir = os.path.dirname(__file__)
-    if hasattr(sys, "_MEIPASS"):
-        base_path = sys._MEIPASS
-    else:
-        base_path = os.path.abspath(os.path.join(basedir, ".."))
-    path = "weights/table_segmentation.ckpt"
-    model_path = os.path.join(base_path, path)
-    model = TableSegmenter.load_from_checkpoint(model_path, loss="DICE")
-    
-    # Ensure model is on GPU
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
+    # The checkpoint contains all weights; never download encoder weights at runtime.
+    model = TableSegmenter.load_from_checkpoint(
+        resource_path("weights/table_segmentation.ckpt"),
+        map_location="cpu", loss="DICE", encoder_weights=None,
+    )
+    model.to("cpu")
     model.eval()
     return model
 
