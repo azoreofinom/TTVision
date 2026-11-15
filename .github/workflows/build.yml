@@ -65,7 +65,8 @@ jobs:
       PYTHONUTF8: '1'
       UV_PYTHON_DOWNLOADS: never
       UV_NO_PROGRESS: '1'
-      UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
+      # Job-level env supports github, but not the runner context.
+      UV_CACHE_DIR: ${{ github.workspace }}/build/uv-cache
 
     steps:
       - name: Check out source
