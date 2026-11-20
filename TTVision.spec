@@ -33,7 +33,11 @@ a = Analysis(
     binaries=[(str(root / "bin" / (name + extension)), "bin") for name in ("ffmpeg", "ffprobe")],
     datas=datas,
     # six.moves aliases are resolved by PyInstaller's pre-safe-import hook.
-    hiddenimports=["six", "six.moves"],
+    # Pillow's compiled Tk bridge imports its library finder through the C API;
+    # PyInstaller cannot discover that dependency from Python bytecode.
+    hiddenimports=["six", "six.moves"] + (
+        ["PIL._imagingtk", "PIL._tkinter_finder"] if sys.platform.startswith("linux") else []
+    ),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

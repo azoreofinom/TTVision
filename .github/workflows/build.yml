@@ -2,62 +2,31 @@ name: Build standalone apps
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    tags: ['v*']
-    paths:
-      - '.github/workflows/build.yml'
-      - '.python-version'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - 'TTVision.spec'
-      - 'src/**'
-      - 'scripts/**'
-      - 'tests/**'
-      - 'packaging/**'
-      - 'images/**'
-      - 'weights/**'
-      - 'LICENSE'
-  pull_request:
-    paths:
-      - '.github/workflows/build.yml'
-      - '.python-version'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - 'TTVision.spec'
-      - 'src/**'
-      - 'scripts/**'
-      - 'tests/**'
-      - 'packaging/**'
-      - 'images/**'
-      - 'weights/**'
-      - 'LICENSE'
+    inputs:
+      target:
+        description: Platform to build
+        type: choice
+        required: true
+        default: windows-x64
+        options:
+          - windows-x64
+          - macos-arm64
+          - linux-x64
+
+run-name: Build ${{ inputs.target }} (${{ github.ref_name }})
 
 permissions:
   contents: read
 
 concurrency:
-  group: standalone-${{ github.workflow }}-${{ github.ref }}
+  group: standalone-${{ github.workflow }}-${{ github.ref }}-${{ inputs.target }}
   cancel-in-progress: true
 
 jobs:
   build:
-    name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.runner }}
+    name: Build ${{ inputs.target }}
+    runs-on: ${{ fromJSON('{"windows-x64":"windows-2022","macos-arm64":"macos-15","linux-x64":"ubuntu-22.04"}')[inputs.target] }}
     timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: windows-x64
-            runner: windows-2022
-            architecture: x64
-          - target: macos-arm64
-            runner: macos-15
-            architecture: arm64
-          - target: linux-x64
-            runner: ubuntu-22.04
-            architecture: x64
     defaults:
       run:
         shell: bash
@@ -78,7 +47,7 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version-file: '.python-version'
-          architecture: ${{ matrix.architecture }}
+          architecture: ${{ inputs.target == 'macos-arm64' && 'arm64' || 'x64' }}
 
       - name: Install pinned build environment
         run: |
@@ -90,10 +59,10 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libgl1 libglib2.0-0 libtk8.6
+          sudo apt-get install --no-install-recommends -y libgl1 libglib2.0-0 libtk8.6 xvfb xauth
 
       - name: Download verified FFmpeg and FFprobe
-        run: uv run --frozen --extra build python scripts/fetch_ffmpeg.py --target '${{ matrix.target }}'
+        run: uv run --frozen --extra build python scripts/fetch_ffmpeg.py --target '${{ inputs.target }}'
 
       - name: Run portability tests
         run: uv run --frozen --extra build python -m unittest discover -s tests -v
@@ -102,6 +71,10 @@ jobs:
         timeout-minutes: 5
         run: uv run --frozen --extra build python scripts/smoke_test.py
 
+      - name: Test Linux Tk image display
+        if: runner.os == 'Linux'
+        run: xvfb-run -a uv run --frozen --extra build python -m unittest discover -s tests -p test_tk_images.py -v
+
       - name: Build standalone application
         run: |
           mkdir -p build/ci
@@ -109,12 +82,17 @@ jobs:
 
       - name: Test frozen application and create download
         timeout-minutes: 10
-        run: python scripts/ci_package.py --target '${{ matrix.target }}'
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a env TTVISION_TEST_GUI=1 python scripts/ci_package.py --target '${{ inputs.target }}'
+          else
+            python scripts/ci_package.py --target '${{ inputs.target }}'
+          fi
 
       - name: Upload tested application
         uses: actions/upload-artifact@v6
         with:
-          name: TTVision-${{ matrix.target }}-${{ github.run_number }}
+          name: TTVision-${{ inputs.target }}-${{ github.run_number }}
           path: build/artifacts/*
           if-no-files-found: error
           compression-level: 0
@@ -124,7 +102,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: build-logs-${{ matrix.target }}-${{ github.run_number }}
+          name: build-logs-${{ inputs.target }}-${{ github.run_number }}
           path: |
             build/ci/*.log
             build/ci/*.txt

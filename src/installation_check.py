@@ -18,6 +18,22 @@ def run_installation_check():
     import mask_processing
     from app_paths import media_tool, resource_path, subprocess_options
 
+    if os.environ.get("TTVISION_TEST_GUI") == "1":
+        import tkinter as tk
+        from PIL import Image, ImageTk
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            with Image.open(resource_path("images/output_table_horizontal.png")) as image:
+                photo = ImageTk.PhotoImage(image, master=root)
+                label = tk.Label(root, image=photo)
+                label.pack()
+                root.update_idletasks()
+                assert photo.width() == image.width
+            print("Pillow/Tk image display passed.")
+        finally:
+            root.destroy()
+
     original_cwd = Path.cwd()
     try:
         with tempfile.TemporaryDirectory(prefix="TTVision smoke ") as folder:

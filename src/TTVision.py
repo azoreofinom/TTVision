@@ -228,7 +228,7 @@ class StatsGUI:
             for bounce in bounces:
                 draw.circle(bounce,radius=2,fill=(255,0,0))
             
-            self.tk_image = ImageTk.PhotoImage(image_copy)
+            self.tk_image = ImageTk.PhotoImage(image_copy, master=self.root)
             self.image_label.config(image=self.tk_image, text="")
        
 
@@ -247,7 +247,7 @@ class StatsGUI:
         """Load and display an image from a path."""
         self.pil_image = Image.open(path)
         
-        self.tk_image = ImageTk.PhotoImage(self.pil_image)
+        self.tk_image = ImageTk.PhotoImage(self.pil_image, master=self.root)
         self.image_label.config(image=self.tk_image, text="")
 
     def analyze_video(self):
