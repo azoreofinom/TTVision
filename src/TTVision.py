@@ -1,14 +1,18 @@
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
-import sv_ttk
-from PIL import Image, ImageTk,ImageDraw
 import os
-import analyze_video
-import threading
 import queue
-import stats
-import edit_video
 import sys
+import threading
+import traceback
+from contextlib import redirect_stderr, redirect_stdout
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+
+import sv_ttk
+from PIL import Image, ImageDraw, ImageTk
+
+import analyze_video
+import edit_video
+import stats
 from app_paths import resource_path
 
 if sys.platform == "win32":
@@ -39,6 +43,8 @@ class StatsGUI:
         self.video_path = None
         self.root = root
         self.root.title("TTVision")
+        self.window_icon = tk.PhotoImage(master=root, file=str(resource_path("images/racket.png")))
+        self.root.iconphoto(True, self.window_icon)
         self.root.geometry("1200x800")
 
         self.stop_event = None
@@ -95,11 +101,18 @@ class StatsGUI:
         ttk.Label(preset_frame, text="Video Editing Preset:").pack(side=tk.LEFT, padx=5)
 
         self.ffmpeg_preset = tk.StringVar(value="fast")
-        preset_options = ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"]
+        preset_options = list(edit_video.ENCODER_PRESETS)
         self.preset_dropdown = ttk.Combobox(preset_frame, textvariable=self.ffmpeg_preset, values=preset_options, state="readonly", width=12)
         self.preset_dropdown.pack(side=tk.LEFT, padx=5)
 
-
+        encoder_frame = ttk.Frame(left_frame)
+        encoder_frame.pack(pady=5)
+        ttk.Label(encoder_frame, text="Video encoder:").pack(side=tk.LEFT, padx=5)
+        self.encoder_choice = tk.StringVar(value="Hardware(GPU)")
+        ttk.Combobox(
+            encoder_frame, textvariable=self.encoder_choice,
+            values=["Hardware(GPU)", "Software (CPU)"], state="readonly", width=16,
+        ).pack(side=tk.LEFT, padx=5)
 
 
 
@@ -271,7 +284,10 @@ class StatsGUI:
             self.worker_thread = threading.Thread(
                 target=edit_video.remove_low_overlap_segments,
                 args=(self.video_path, self.stop_event, self.progress_callback, self.ffmpeg_preset.get(), self.warning_queue),
-                kwargs={"output_path": output_path},
+                kwargs={
+                    "output_path": output_path,
+                    "encoder": "cpu" if self.encoder_choice.get() == "Software (CPU)" else "auto",
+                },
                 daemon=True
             )
             self.worker_thread.start()
@@ -345,21 +361,23 @@ class StatsGUI:
    
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--install-desktop"]:
+        from desktop_integration import install_linux_launcher
+        print(f"Installed launcher: {install_linux_launcher()}")
+        sys.exit(0)
     # Windowed executables have no console streams on Windows.
     if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
-        from contextlib import redirect_stdout, redirect_stderr
-        from installation_check import main as check_installation
-        import traceback
+        from installation_check import run_installation_check
         with open(sys.argv[2], "w", encoding="utf-8") as report:
             with redirect_stdout(report), redirect_stderr(report):
                 try:
-                    check_installation()
+                    run_installation_check()
                 except Exception:
                     traceback.print_exc()
                     sys.exit(1)
         sys.exit(0)
 
-    root = tk.Tk()
+    root = tk.Tk(className="TTVision")
     sv_ttk.set_theme("dark")
 
     app = StatsGUI(root, default_image_path=resource_path("images/output_table_horizontal.png"))

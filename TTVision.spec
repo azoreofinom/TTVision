@@ -12,11 +12,14 @@ verify(native_target())
 extension = ".exe" if sys.platform == "win32" else ""
 datas = [
     (str(root / "images/output_table_horizontal.png"), "images"),
+    (str(root / "images/racket.png"), "images"),
     (str(root / "weights/table_segmentation.ckpt"), "weights"),
     (str(root / "third_party/ffmpeg"), "licenses/ffmpeg"),
     (str(root / "LICENSE"), "licenses/ttvision"),
     (str(root / "packaging/THIRD_PARTY.md"), "licenses"),
 ]
+if sys.platform.startswith("linux"):
+    datas.append((str(root / "packaging/linux/org.ttvision.TTVision.desktop"), "packaging/linux"))
 datas += collect_data_files("sv_ttk")
 # timm scripts activation functions during import; TorchScript needs their
 # Python source files even in a frozen application.
@@ -46,6 +49,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name='TTVision',
+    icon=str(root / "images/racket.png") if sys.platform == "win32" else None,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -61,4 +65,6 @@ exe = EXE(
 )
 bundle = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="TTVision")
 if sys.platform == "darwin":
-    app = BUNDLE(bundle, name="TTVision.app", bundle_identifier="org.ttvision.desktop")
+    # PyInstaller converts PNG to ICNS using the bundled build-time Pillow dependency.
+    app = BUNDLE(bundle, name="TTVision.app", bundle_identifier="org.ttvision.desktop",
+                 icon=str(root / "images/racket.png"))

@@ -6,6 +6,7 @@ import subprocess
 import json
 import mask_processing
 import argparse
+import tempfile
 from pathlib import Path
 from app_paths import media_tool, subprocess_options
 
@@ -79,130 +80,234 @@ def merge_intervals(intervals):
 
 
 
-def run_ffmpeg_with_progress(cmd, total_duration_sec, progress_callback, total_frames, fps, stop_event = None, warning_queue = None):
-    """Run ffmpeg and parse progress output."""
-    
-    # Insert progress flags after 'ffmpeg'
-    progress_cmd = [cmd[0], "-loglevel", "fatal","-progress", "pipe:1", "-nostats"] + cmd[1:]
-    
+def run_ffmpeg_with_progress(cmd, total_duration_sec, progress_callback, total_frames, fps, stop_event=None, warning_queue=None):
+    """Drain progress on a reader thread so cancellation also works during stalls."""
+    import queue
+    import threading
 
-    process = subprocess.Popen(
-        progress_cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        **subprocess_options()
-    )
-    for line in process.stdout:
-        if stop_event is not None and stop_event.is_set():
-            print("Encoding cancelled!")
-            process.terminate()
+    if stop_event is not None and stop_event.is_set():
+        return False
+    progress_cmd = [cmd[0], "-loglevel", "error", "-progress", "pipe:1", "-nostats"] + cmd[1:]
+    lines = queue.Queue()
+    with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as errors:
+        process = subprocess.Popen(
+            progress_cmd, stdout=subprocess.PIPE, stderr=errors,
+            text=True, **subprocess_options()
+        )
+
+        def read_progress():
             try:
-                process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
+                for line in process.stdout:
+                    lines.put(line)
+            finally:
+                lines.put(None)
+
+        reader = threading.Thread(target=read_progress, daemon=True)
+        reader.start()
+        cancelled = False
+        try:
+            while True:
+                if stop_event is not None and stop_event.is_set():
+                    cancelled = True
+                    break
+                try:
+                    line = lines.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+                if line is None:
+                    break
+                if line.startswith("out_time_ms="):
+                    try:
+                        seconds = int(line.strip().split("=", 1)[1]) / 1_000_000
+                    except ValueError:
+                        continue
+                    frame = max(0, min(int(seconds * fps), total_frames))
+                    if progress_callback:
+                        progress_callback(frame, total_frames)
+            if cancelled:
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+            process.wait()
+        finally:
+            if process.poll() is None:
                 process.kill()
-            
-            if os.path.exists(cmd[-1]):
-                print("Removed partially encoded video")
-                os.remove(cmd[-1])
+                process.wait()
+            reader.join()
+            process.stdout.close()
+
+        if cancelled or (stop_event is not None and stop_event.is_set()):
+            Path(cmd[-1]).unlink(missing_ok=True)
             return False
-
-        line = line.strip()
-        if line.startswith("out_time_ms="):
-            try:
-                out_time_sec = int(line.split("=")[1]) / 1_000_000
-                # Map ffmpeg time progress to frame progress
-                # FFmpeg starts from 0; offset by the init frames
-                ffmpeg_frame = int(out_time_sec * fps)
-                if progress_callback:
-                    progress_callback(ffmpeg_frame, total_frames)
-                else:
-                    print(f"Encoding progress: {ffmpeg_frame/total_frames*100:.2f}%")
-            except ValueError:
-                pass
-    
-    process.wait()
-
-    return_code = process.returncode
-
-    if return_code != 0:
-        error_output = process.stderr.read()
-        print("FFmpeg failed with return code:", return_code)
-        print(error_output)
-        if warning_queue:
-            warning_queue.put(error_output)
-        return False
-
-    output_file = cmd[-1]
-    if not os.path.exists(output_file):
-        msg = "FFmpeg finished but output file was not created!"
-        print(msg)
-        if warning_queue:
-            warning_queue.put(msg)
-        return False
-
+        if process.returncode != 0 or not Path(cmd[-1]).is_file():
+            errors.seek(0)
+            message = errors.read() or "FFmpeg did not create the output video."
+            print(message)
+            if warning_queue is not None:
+                warning_queue.put(message)
+            return False
     return True
 
 
+ENCODERS = {"cpu": "libx264", "nvidia": "h264_nvenc", "amd": "h264_amf", "intel": "h264_qsv"}
 
-def build_command(video_path, intervals_sec, preset, output_path):
-    # Build filter_complex script
-    audio_exists = has_audio_stream(video_path)
+# Ordered from fastest encoding to greatest encoding effort. Hardware preset
+# names describe an effort trade-off, not equivalent quality across encoders.
+ENCODER_PRESETS = {
+    "ultrafast": ("p1", "speed"),
+    "superfast": ("p2", "speed"),
+    "veryfast": ("p3", "speed"),
+    "faster": ("p3", "balanced"),
+    "fast": ("p4", "balanced"),
+    "medium": ("p4", "balanced"),
+    "slow": ("p5", "quality"),
+    "slower": ("p6", "quality"),
+    "veryslow": ("p7", "quality"),
+}
 
-    filter_parts = []
-    concat_inputs = []
 
-    for i, (start, end) in enumerate(intervals_sec):
-        if audio_exists:
-            filter_parts.append(
-                f"[0:v]trim=start={start}:end={end},setpts=PTS-STARTPTS[v{i}];"
-                f"[0:a]atrim=start={start}:end={end},asetpts=PTS-STARTPTS[a{i}];"
-            )
-            concat_inputs.append(f"[v{i}][a{i}]")
-        else:
-            filter_parts.append(
-                f"[0:v]trim=start={start}:end={end},setpts=PTS-STARTPTS[v{i}];"
-            )
-            concat_inputs.append(f"[v{i}]")
-
-    filter_complex = "".join(filter_parts)
-    filter_complex += "".join(concat_inputs)
-
-    if audio_exists:
-        filter_complex += f"concat=n={len(intervals_sec)}:v=1:a=1[outv][outa]"
+def encoder_options(encoder, preset):
+    nvenc_preset, amf_quality = ENCODER_PRESETS[preset]
+    fast = preset in ("ultrafast", "superfast", "veryfast", "faster", "fast")
+    if encoder == "h264_nvenc":
+        options = ["-preset", nvenc_preset, "-rc", "vbr", "-cq", "23", "-b:v", "0"]
+    elif encoder == "h264_amf":
+        options = ["-quality", amf_quality, "-rc", "cqp", "-qp_i", "23", "-qp_p", "23"]
+    elif encoder == "h264_qsv":
+        options = ["-preset", "fast" if fast else "slow", "-global_quality", "23"]
     else:
-        filter_complex += f"concat=n={len(intervals_sec)}:v=1[outv]"
+        options = ["-preset", preset, "-crf", "23"]
+    return ["-c:v", encoder] + options + ["-pix_fmt", "yuv420p"]
 
-    cmd = [
-        media_tool("ffmpeg"),
-        "-y",
-        "-i", video_path,
-        "-filter_complex", filter_complex,
-        "-map", "[outv]",
-    ]
 
+def select_encoder(mode, preset, work, stop_event):
+    """Test real encoding rather than trusting the compiled encoder list."""
+    if mode not in ("auto", *ENCODERS):
+        raise ValueError(f"Unknown encoder mode: {mode}")
+    if mode == "cpu":
+        return "libx264"
+    candidates = [ENCODERS[key] for key in ("nvidia", "amd", "intel")] if mode == "auto" else [ENCODERS[mode]]
+    probe = work / "encoder-probe.mkv"
+    try:
+        for encoder in candidates:
+            if stop_event is not None and stop_event.is_set():
+                break
+            cmd = [media_tool("ffmpeg"), "-y", "-f", "lavfi", "-i",
+                   "color=size=128x128:rate=30:duration=0.1"]
+            cmd += encoder_options(encoder, preset) + [str(probe)]
+            # Bound driver initialization and keep Cancel responsive via the runner.
+            import threading
+            probe_stop = threading.Event()
+            timer = threading.Timer(10, probe_stop.set)
+
+            class ProbeStop:
+                def is_set(self):
+                    return probe_stop.is_set() or (stop_event is not None and stop_event.is_set())
+
+            timer.start()
+            try:
+                if run_ffmpeg_with_progress(cmd, 0.1, None, 3, 30, ProbeStop()):
+                    return encoder
+            finally:
+                timer.cancel()
+            probe.unlink(missing_ok=True)
+    finally:
+        probe.unlink(missing_ok=True)
+    return "libx264"
+
+
+def build_clip_command(video_path, start, end, preset, output_path, audio_exists, encoder="libx264"):
+    # Input seeking is accurate when transcoding: preroll before start is discarded.
+    cmd = [media_tool("ffmpeg"), "-y", "-ss", str(start), "-i", str(video_path),
+           "-t", str(end - start), "-map", "0:v:0"]
     if audio_exists:
-        cmd += ["-map", "[outa]"]
-
-   
-
-    # for win media player compatibility
-    cmd += [
-    "-c:v", "libx264",     # ensure H.264
-    "-preset", preset,     # your selectable preset still works
-    # "-crf", "18",
-    "-pix_fmt", "yuv420p", # WMP compatibility
-    ]
+        cmd += ["-map", "0:a:0"]
+    cmd += encoder_options(encoder, preset)
     if audio_exists:
-        cmd += [
-            "-c:a", "aac",
-            "-b:a", "192k",
-        ]
-    cmd += [
-        "-movflags", "+faststart",
-        output_path
-    ]
-    return cmd
+        # PCM intermediates avoid a separate AAC priming delay at every cut.
+        cmd += ["-c:a", "pcm_s16le"]
+    return cmd + [str(output_path)]
+
+
+def render_sequential_clips(video_path, intervals_sec, preset, output_path, fps,
+                            progress_callback=None, stop_event=None, warning_queue=None, encoder="auto"):
+    """Render a single interval at a time; join video by stream copy."""
+    intervals_sec = [(start, end) for start, end in intervals_sec if end > start]
+    if not intervals_sec:
+        if warning_queue is not None:
+            warning_queue.put("No segments were found to keep.")
+        return False
+    if stop_event is not None and stop_event.is_set():
+        return False
+    audio_exists = has_audio_stream(video_path)
+    total_duration = sum(end - start for start, end in intervals_sec)
+
+    last_progress = 0
+
+    def report(fraction):
+        nonlocal last_progress
+        last_progress = max(last_progress, min(999, max(0, int(fraction * 1000))))
+        if progress_callback:
+            # Only the caller signals completion, after the final file is published.
+            progress_callback(last_progress, 1000)
+
+    # Keep temporary media beside the destination, including a staged final file.
+    # An unsuccessful export therefore leaves an existing destination untouched.
+    with tempfile.TemporaryDirectory(prefix="ttvision-clips-", dir=Path(output_path).resolve().parent) as folder:
+        work = Path(folder)
+        selected = select_encoder(encoder, preset, work, stop_event)
+        print(f"Video encoder: {selected} {preset}")
+        # Retry the entire clip set on CPU: never concatenate mixed encoders.
+        for attempt in range(2):
+            completed = 0.0
+            filenames = []
+            failed = False
+            for index, (start, end) in enumerate(intervals_sec):
+                duration = end - start
+                clip = work / f"clip_{index:06d}.mkv"
+                cmd = build_clip_command(video_path, start, end, preset, clip, audio_exists, selected)
+
+                def clip_progress(frame, total, offset=completed, length=duration):
+                    report(0.95 * (offset + length * frame / max(1, total)) / total_duration)
+
+                if not run_ffmpeg_with_progress(cmd, duration, clip_progress,
+                        max(1, round(duration * fps)), fps, stop_event,
+                        warning_queue if selected == "libx264" else None):
+                    failed = True
+                    break
+                completed += duration
+                filenames.append(clip.name)
+                report(0.95 * completed / total_duration)
+            if not failed:
+                break
+            if (stop_event is not None and stop_event.is_set()) or selected == "libx264":
+                return False
+            print(f"{selected} failed; restarting all clips with CPU encoding.")
+            for clip in work.glob("clip_*.mkv"):
+                clip.unlink()
+            selected = "libx264"
+
+        manifest = work / "clips.txt"
+        manifest.write_text("".join(f"file '{name}'\n" for name in filenames), encoding="utf-8")
+        staged = work / "edited.mp4"
+        cmd = [media_tool("ffmpeg"), "-y", "-f", "concat", "-safe", "1",
+               "-i", str(manifest), "-map", "0:v:0", "-c:v", "copy"]
+        if audio_exists:
+            cmd += ["-map", "0:a:0", "-c:a", "aac", "-b:a", "192k"]
+        cmd += ["-movflags", "+faststart", str(staged)]
+
+        def join_progress(frame, total):
+            report(0.95 + 0.05 * frame / max(1, total))
+
+        if not run_ffmpeg_with_progress(cmd, total_duration, join_progress,
+                max(1, round(total_duration * fps)), fps, stop_event, warning_queue):
+            return False
+        if stop_event is not None and stop_event.is_set():
+            return False
+        os.replace(staged, output_path)
+    return True
 
 
 def remove_low_overlap_segments(
@@ -213,6 +318,7 @@ def remove_low_overlap_segments(
         warning_queue =None,
         display=False,
         output_path=None,
+        encoder="auto",
         ):
 
     if not ffmpeg_installed():
@@ -333,11 +439,10 @@ def remove_low_overlap_segments(
         if common_pix < PIXEL_COUNT_THRESHOLD:
             low_overlap_counter += 1
 
-            if low_overlap_counter >= frames_to_trigger:
-                if in_keep_segment:
-                    segment_end_frame = frame_idx - frames_to_trigger
-                    intervals.append((segment_start_frame, segment_end_frame))
-                    in_keep_segment = False
+            if low_overlap_counter >= frames_to_trigger and in_keep_segment:
+                segment_end_frame = frame_idx - frames_to_trigger
+                intervals.append((segment_start_frame, segment_end_frame))
+                in_keep_segment = False
         else:
             low_overlap_counter = 0
 
@@ -360,10 +465,11 @@ def remove_low_overlap_segments(
         intervals_sec.append((start_sec, end_sec))
 
     intervals_sec = merge_intervals(intervals_sec)
-    total_frames = sum(round((end - start) * fps) for start, end in intervals_sec)
    
-    cmd = build_command(video_path,intervals_sec, preset, output_path)
-    finished = run_ffmpeg_with_progress(cmd, total_frames / fps, progress_callback, total_frames, fps, stop_event, warning_queue)
+    finished = render_sequential_clips(
+        video_path, intervals_sec, preset, output_path, fps,
+        progress_callback, stop_event, warning_queue, encoder
+    )
     if finished and progress_callback:
         progress_callback(1,1)
         print(f"Edited video saved to: {output_path}")
@@ -391,10 +497,12 @@ def parse_args():
     parser.add_argument(
         "--preset",
         type=str,
-        default="ultrafast",
-        help="Encoding preset (default: ultrafast)"
+        default="fast",
+        help="Encoding preset (default: fast)"
     )
 
+    parser.add_argument("--encoder", choices=["auto", *ENCODERS], default="auto",
+                        help="Video encoder preference; falls back to CPU (default: auto)")
     return parser.parse_args()
 
 
@@ -405,4 +513,5 @@ if __name__ == '__main__':
         display=args.display,
         preset=args.preset,
         output_path=args.output,
+        encoder=args.encoder,
     )

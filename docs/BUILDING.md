@@ -34,6 +34,19 @@ The executable alone is not sufficient. Keep file permissions when archiving
 macOS/Linux packages. `gui.spec` is an obsolete local configuration; use
 `TTVision.spec`, which is tracked in Git.
 
+Application icons use `images/racket.png`: Windows embeds an ICO in the EXE,
+and macOS builds convert it to ICNS for the application bundle. Pillow performs
+both conversions during the build; no additional icon tools are required.
+
+On Linux, extract the entire folder to its permanent location, then run
+`./TTVision --install-desktop` from that folder to add an application-menu
+launcher with the racket icon. This needs no root privileges or system Python.
+The entry is installed under `$XDG_DATA_HOME/applications` (normally
+`~/.local/share/applications`). Run the command again after moving the folder.
+To remove the menu entry, delete `org.ttvision.TTVision.desktop` from that
+applications directory. The launcher uses absolute paths to the executable and
+bundled PNG; the desktop environment may take a moment to refresh its menu.
+
 The build includes Python, Tk resources, CPU PyTorch, model weights, image,
 theme resources, FFmpeg and FFprobe. Release inference uses CPU consistently.
 Model restoration disables pretrained encoder downloads. Frozen apps never

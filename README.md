@@ -28,6 +28,16 @@ python edit_video.py "path\to\video" --preset your_preset_choice
 
 The available preset options can be found at: https://trac.ffmpeg.org/wiki/Encode/H.264
 
+Editing uses sequential clips to keep memory usage bounded. The GUI offers
+Hardware (default) and Software (CPU) encoding. Hardware automatically
+tests NVIDIA NVENC, AMD AMF, and Intel Quick
+Sync, then falls back to CPU encoding. A hardware failure during rendering
+restarts all clips on CPU. The command line also accepts `--encoder` with
+`auto`, `cpu`, `nvidia`, `amd`, or `intel`. Hardware encoding
+requires a supported GPU and compatible graphics driver; CUDA and GPU PyTorch
+are not required. The preset controls encoding speed; quality and file size can
+vary between encoders. Decoding and video analysis remain on CPU.
+
 Because the system relies on visual detection of the table and ball, **camera placement and recording conditions are critical** for reliable results. Take a look at the "assumptions" section below. 
 
 

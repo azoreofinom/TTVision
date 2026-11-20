@@ -7,7 +7,9 @@ import sys
 import tempfile
 from unittest.mock import patch
 
-def main():
+def run_installation_check():
+    # Load test dependencies after the caller redirects output, so import
+    # failures are included in the report from a windowed executable.
     import cv2
     import numpy as np
     import torch
@@ -22,6 +24,7 @@ def main():
             os.chdir(folder)
             with patch.dict(os.environ, {"PATH": ""}), patch.object(socket.socket, "connect", side_effect=AssertionError("Unexpected network access")):
                 assert cv2.imread(str(resource_path("images/output_table_horizontal.png"))) is not None
+                assert cv2.imread(str(resource_path("images/racket.png"))) is not None
                 model = mask_processing.load_model()
                 mask = mask_processing.segment_image(np.zeros((320, 640, 3), dtype=np.uint8), model)
                 assert mask.shape == (320, 640), mask.shape
@@ -35,8 +38,9 @@ def main():
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", source,
                 ], check=True, **subprocess_options())
                 assert edit_video.has_audio_stream(source)
-                command = edit_video.build_command(source, [(0, 0.5)], "ultrafast", output)
-                assert edit_video.run_ffmpeg_with_progress(command, 0.5, None, 5, 10)
+                assert edit_video.render_sequential_clips(
+                    source, [(0, 0.3), (0.6, 0.9)], "ultrafast", output, 10
+                )
                 assert Path(output).stat().st_size > 0
                 assert edit_video.has_audio_stream(output)
             print(f"Offline CPU inference and bundled FFmpeg export passed (torch {torch.__version__}).")
@@ -47,4 +51,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_installation_check()
