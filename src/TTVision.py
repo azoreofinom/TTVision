@@ -108,10 +108,10 @@ class StatsGUI:
         encoder_frame = ttk.Frame(left_frame)
         encoder_frame.pack(pady=5)
         ttk.Label(encoder_frame, text="Video encoder:").pack(side=tk.LEFT, padx=5)
-        self.encoder_choice = tk.StringVar(value="Hardware(GPU)")
+        self.encoder_choice = tk.StringVar(value="Hardware (GPU)")
         ttk.Combobox(
             encoder_frame, textvariable=self.encoder_choice,
-            values=["Hardware(GPU)", "Software (CPU)"], state="readonly", width=16,
+            values=["Hardware (GPU)", "Software (CPU)"], state="readonly", width=16,
         ).pack(side=tk.LEFT, padx=5)
 
 

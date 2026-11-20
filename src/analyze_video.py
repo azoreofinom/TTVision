@@ -403,10 +403,7 @@ def is_table_view(frame, table_mask):
     common  = cv2.bitwise_and(edges,table_mask)
     overlap_percentage = cv2.countNonZero(common)/cv2.countNonZero(table_mask)
     # print(overlap_percentage)
-    if  overlap_percentage > 0.15:
-        return True
-    else:
-        return False
+    return overlap_percentage > 0.15
 
 
 def get_white_threshold(frame,mask):

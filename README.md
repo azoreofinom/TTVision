@@ -14,19 +14,20 @@ TTVision provides two primary capabilities:
 
 
 
-If you are using Windows and have installed FFmpeg, you can simply run the application after downloading it from the releases tab. Make sure to place the executable in a folder where administrator permissions are not required, as that's where TTVision will attempt to save the edited video.
+Ready-to-download builds are available on the [Releases page](https://github.com/azoreofinom/TTApp/releases). Download the build for your operating system and extract the entire package before running it. FFmpeg and FFprobe are included; you do not need to install them separately.
 
-If you only wish to edit videos and want to do so from the terminal, you can run the following commands:
+To edit videos from source in the terminal, use Python 3.12 in a fresh virtual environment and run these commands from the project root:
 
 ```
 python -m pip install --require-hashes --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
 ```
 
 ```
-python edit_video.py "path\to\video" --preset your_preset_choice
+python scripts/fetch_ffmpeg.py
+python src/edit_video.py "path/to/video.mp4" --preset fast --encoder auto
 ```
 
-The available preset options can be found at: https://trac.ffmpeg.org/wiki/Encode/H.264
+Use `--output "path/to/edited.mp4"` to choose a destination; otherwise, the edited video is saved beside the input. The setup command downloads the bundled media tools for your platform.
 
 Editing uses sequential clips to keep memory usage bounded. The GUI offers
 Hardware (default) and Software (CPU) encoding. Hardware automatically
@@ -35,26 +36,35 @@ Sync, then falls back to CPU encoding. A hardware failure during rendering
 restarts all clips on CPU. The command line also accepts `--encoder` with
 `auto`, `cpu`, `nvidia`, `amd`, or `intel`. Hardware encoding
 requires a supported GPU and compatible graphics driver; CUDA and GPU PyTorch
-are not required. The preset controls encoding speed; quality and file size can
-vary between encoders. Decoding and video analysis remain on CPU.
+are not required. Decoding and video analysis remain on CPU.
+
+The editing presets range from `ultrafast` to `veryslow`: `ultrafast`,
+`superfast`, `veryfast`, `faster`, `fast`, `medium`, `slow`, `slower`, and
+`veryslow`. Faster presets spend less time compressing and usually produce
+larger files at similar visual quality. Slower presets spend more time
+compressing and can produce smaller files. The exact trade-off depends on the
+encoder and footage; output size is not fixed. Hardware encoders map these
+choices to their available speed/quality presets, so some choices use the same
+hardware preset.
+
+GPU encoding is usually faster, while CPU encoding is often more efficient at
+compression (smaller files at comparable quality). Results depend on your CPU,
+GPU, drivers, and footage; a GPU is not guaranteed to be faster. Different
+encoders can also produce different quality and file sizes with the same
+selected preset.
 
 Because the system relies on visual detection of the table and ball, **camera placement and recording conditions are critical** for reliable results. Take a look at the "assumptions" section below. 
 
 
 ## Requirements
 
-For building self-contained Windows, macOS, and Linux packages, see
-[the build guide](docs/BUILDING.md). These builds include FFmpeg and FFprobe;
-users do not need a separate installation. Existing older releases described
-above still require system FFmpeg.
+The standalone packages include Python, dependencies, model weights, FFmpeg,
+and FFprobe. Keep the entire extracted application folder together.
 
-* **FFmpeg** (required for video processing)
-  https://ffmpeg.org/download.html
-
-Installation instructions are also available at: https://github.com/oop7/ffmpeg-install-guide
-
-
-FFmpeg must be available in your system PATH or accessible by the application, as it is needed for video editing.
+For source setup and building self-contained Windows, macOS, and Linux
+packages, see [the build guide](docs/BUILDING.md). Exact Python dependencies
+are listed in `pyproject.toml` and locked in `uv.lock`; `requirements.txt`
+provides the pinned pip installation used above.
 
 
 ## General recording assumptions
